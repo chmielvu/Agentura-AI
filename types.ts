@@ -9,6 +9,7 @@ export enum TaskType {
   Code = 'Code',
   Creative = 'Creative',
   Critique = 'Critique',
+  Retry = 'Retry',
 }
 
 export enum Persona {
@@ -59,7 +60,7 @@ export interface CritiqueResult {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
   file?: {
     name: string;
@@ -69,7 +70,12 @@ export interface ChatMessage {
   sources?: GroundingSource[];
   isLoading?: boolean;
   plan?: Plan;
-  functionCalls?: FunctionCall[];
+  // FIX: Update to support multiple function calls from the API.
+  functionCalls?: FunctionCall[]; // A message can have one or more function calls
+  functionResponse?: {
+    name: string;
+    response: any;
+  };
   critique?: CritiqueResult;
   taskType?: TaskType; // Used for visualization of the loading message
 }

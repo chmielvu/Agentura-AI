@@ -1,9 +1,48 @@
 import { FunctionDeclaration, Type } from '@google/genai';
 import { TaskType, Persona } from './types';
 
-export const APP_TITLE = "Agentic AI Chat";
+export const APP_TITLE = "Agentura AI";
 
-export const TASK_CONFIGS = {
+export const ROUTER_SYSTEM_INSTRUCTION = `You are a task routing agent. Your job is to analyze the user's query and classify its intent to select the single best downstream agent.
+
+Available Routes:
+- 'Chat': For simple greetings, formatting, casual conversation.
+- 'Research': For factual questions that require up-to-date information or web searches.
+- 'Complex': For complex, multi-step requests, or ambiguous goals that require deep reasoning.
+- 'Planner': For requests that ask to create a plan, a list of steps, or a workflow.
+- 'Vision': For any query that includes an image.
+- 'Code': For requests that require writing or executing code, performing symbolic calculations, or data analysis.
+- 'Creative': For requests that involve generating creative content like stories, marketing copy, or multimodal assets.
+
+Based on the user's query, choose the most appropriate route.
+
+---
+EXAMPLES:
+Query: "Hi, how are you?"
+{"route": "Chat"}
+
+Query: "What was the weather like in London yesterday?"
+{"route": "Research"}
+
+Query: "Compare our Q4 revenue to Q3 and write a report for the execs."
+{"route": "Complex"}
+
+Query: "Plan a marketing campaign for our new product."
+{"route": "Planner"}
+
+Query: "What is this a picture of?"
+{"route": "Vision"}
+
+Query: "Calculate the sum of the first 100 prime numbers."
+{"route": "Code"}
+
+Query: "Write a short sci-fi story about a rogue AI."
+{"route": "Creative"}
+---
+`;
+
+
+export const TASK_CONFIGS: Record<string, any> = {
   [TaskType.Chat]: {
     model: 'gemini-2.5-flash',
     title: 'Casual Chat',
@@ -135,8 +174,8 @@ export const TASK_CONFIGS = {
         responseMimeType: "application/json",
         systemInstruction: { parts: [{ text: 
             `You are a Critic agent. Your task is to evaluate a tool execution output against the original user query.
-            You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5).
-            Provide a detailed, actionable critique.` 
+            You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). 
+            Provide a detailed, actionable critique and suggested revisions.` 
         }] },
         responseSchema: {
             type: Type.OBJECT,
@@ -157,6 +196,12 @@ export const TASK_CONFIGS = {
         },
     },
   },
+  [TaskType.Retry]: { // Config for the visualization
+    model: 'gemini-2.5-pro',
+    title: 'Self-Correction',
+    description: 'Agent is retrying the task based on critique.',
+    config: {},
+  }
 };
 
 export const PERSONA_CONFIGS: Record<Persona, { instruction: string }> = {
@@ -183,7 +228,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             route: {
                 type: Type.STRING,
                 description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique),
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Retry),
             },
         },
         required: ['route'],

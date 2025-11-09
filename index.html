@@ -4,17 +4,35 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Agentic AI Chat</title>
+    <title>Agentura AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <link href="https://unpkg.com/vis-network/styles/vis-network.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:ital,wght@0,400;0,700;1,400&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['"Roboto Slab"', 'sans-serif'],
+              mono: ['"Roboto Mono"', 'monospace'],
+            },
             colors: {
-              'brand-blue': '#1a73e8',
+              'background': '#212121', // Very dark grey, almost black
+              'foreground': '#E0E0E0', // Off-white for text
+              'card': '#333333',       // UI elements, chat bubbles
+              'user-bubble': '#4F4F4F',
+              'accent': '#E53935',     // A stark, slightly desaturated red
+              'border': '#424242',
+            },
+            borderRadius: {
+              'lg': '0.125rem',
+              'md': '0.125rem',
+              'sm': '0.125rem',
+              'full': '0.125rem',
             },
             animation: {
               'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
@@ -41,7 +59,7 @@
 }
 </script>
 </head>
-  <body class="bg-gray-900">
+  <body class="bg-background">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

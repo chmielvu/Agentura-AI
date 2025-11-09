@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, FunctionDeclaration, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall, CritiqueResult } from './types';
@@ -58,84 +59,84 @@ const iconSvgs = {
 const agentGraphConfigs: Record<string, { nodes: any[], edges: any[] }> = {
     [TaskType.Chat]: {
         nodes: [
-            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Chat Agent', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
-            { id: 4, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Chat Agent', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }],
     },
     [TaskType.Research]: {
         nodes: [
-            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Perception', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
-            { id: 4, label: 'Research Agent', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
-            { id: 5, label: 'Action: Search', image: svgToDataURI(iconSvgs.SearchIcon), shape: 'image' },
-            { id: 6, label: 'Reasoning', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
-            { id: 7, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Perception', image: svgToDataURI(iconSvgs.PerceptionIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Research Agent', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E0E0E0'), shape: 'image' },
+            { id: 5, label: 'Action: Search', image: svgToDataURI(iconSvgs.SearchIcon, '#E0E0E0'), shape: 'image' },
+            { id: 6, label: 'Reasoning', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E0E0E0'), shape: 'image' },
+            { id: 7, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 }, { from: 6, to: 7 }],
     },
     [TaskType.Complex]: {
         nodes: [
-            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Perception', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
-            { id: 4, label: 'Query Optimizer', image: svgToDataURI(iconSvgs.OptimizeIcon), shape: 'image' },
-            { id: 5, label: 'Thinking', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
-            { id: 6, label: 'Self-Critique', image: svgToDataURI(iconSvgs.CritiqueIcon), shape: 'image' },
-            { id: 7, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Perception', image: svgToDataURI(iconSvgs.PerceptionIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Query Optimizer', image: svgToDataURI(iconSvgs.OptimizeIcon, '#E0E0E0'), shape: 'image' },
+            { id: 5, label: 'Thinking', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E0E0E0'), shape: 'image' },
+            { id: 6, label: 'Self-Critique', image: svgToDataURI(iconSvgs.CritiqueIcon, '#E0E0E0'), shape: 'image' },
+            { id: 7, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 }, { from: 6, to: 7 }],
     },
     [TaskType.Planner]: {
         nodes: [
-            { id: 1, label: 'User Goal', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Planner Agent', image: svgToDataURI(iconSvgs.PlanIcon), shape: 'image' },
-            { id: 4, label: 'Plan Generation', image: svgToDataURI(iconSvgs.GenerateIcon), shape: 'image' },
-            { id: 5, label: 'Output: Plan', image: svgToDataURI(iconSvgs.PlanIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Goal', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Planner Agent', image: svgToDataURI(iconSvgs.PlanIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Plan Generation', image: svgToDataURI(iconSvgs.GenerateIcon, '#E0E0E0'), shape: 'image' },
+            { id: 5, label: 'Output: Plan', image: svgToDataURI(iconSvgs.PlanIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }],
     },
     [TaskType.Vision]: {
         nodes: [
-            { id: 1, label: 'User Input + Image', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Vision Agent', image: svgToDataURI(iconSvgs.ImageIcon), shape: 'image' },
-            { id: 4, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Input + Image', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Vision Agent', image: svgToDataURI(iconSvgs.ImageIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Output', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }],
     },
     [TaskType.Code]: {
         nodes: [
-            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Code Agent', image: svgToDataURI(iconSvgs.CodeBracketIcon), shape: 'image' },
-            { id: 4, label: 'Action: Code Gen', image: svgToDataURI(iconSvgs.GenerateIcon), shape: 'image' },
-            { id: 5, label: 'Observation', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
-            { id: 6, label: 'Critique', image: svgToDataURI(iconSvgs.CritiqueIcon), shape: 'image' },
-            { id: 7, label: 'Final Answer', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Code Agent', image: svgToDataURI(iconSvgs.CodeBracketIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Action: Code Gen', image: svgToDataURI(iconSvgs.GenerateIcon, '#E0E0E0'), shape: 'image' },
+            { id: 5, label: 'Observation', image: svgToDataURI(iconSvgs.PerceptionIcon, '#E0E0E0'), shape: 'image' },
+            { id: 6, label: 'Critique', image: svgToDataURI(iconSvgs.CritiqueIcon, '#E0E0E0'), shape: 'image' },
+            { id: 7, label: 'Final Answer', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 }, { from: 6, to: 7 }],
     },
     [TaskType.Creative]: {
         nodes: [
-            { id: 1, label: 'User Goal', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
-            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
-            { id: 3, label: 'Creative Agent', image: svgToDataURI(iconSvgs.SparklesIcon), shape: 'image' },
-            { id: 4, label: 'Orchestration', image: svgToDataURI(iconSvgs.GenerateIcon), shape: 'image' },
-            { id: 5, label: 'Output: Plan', image: svgToDataURI(iconSvgs.SparklesIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'User Goal', image: svgToDataURI(iconSvgs.UserIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Creative Agent', image: svgToDataURI(iconSvgs.SparklesIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Orchestration', image: svgToDataURI(iconSvgs.GenerateIcon, '#E0E0E0'), shape: 'image' },
+            { id: 5, label: 'Output: Plan', image: svgToDataURI(iconSvgs.SparklesIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }],
     },
     [TaskType.Critique]: {
         nodes: [
-            { id: 1, label: 'Tool Output', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
-            { id: 2, label: 'Critic Agent', image: svgToDataURI(iconSvgs.CritiqueIcon), shape: 'image' },
-            { id: 3, label: 'Analysis', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
-            { id: 4, label: 'Output: Scores', image: svgToDataURI(iconSvgs.CritiqueIcon, '#67e8f9'), shape: 'image' },
+            { id: 1, label: 'Tool Output', image: svgToDataURI(iconSvgs.PerceptionIcon, '#E0E0E0'), shape: 'image' },
+            { id: 2, label: 'Critic Agent', image: svgToDataURI(iconSvgs.CritiqueIcon, '#E0E0E0'), shape: 'image' },
+            { id: 3, label: 'Analysis', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#E0E0E0'), shape: 'image' },
+            { id: 4, label: 'Output: Scores', image: svgToDataURI(iconSvgs.CritiqueIcon, '#E53935'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }],
     },
@@ -177,20 +178,20 @@ const AgentGraphVisualizer: React.FC<{ taskType: TaskType }> = ({ taskType }) =>
                 size: 25,
                 font: {
                     size: 12,
-                    color: '#d1d5db',
+                    color: '#E0E0E0',
                 },
                 color: {
-                  background: '#374151',
-                  border: '#4b5563',
+                  background: '#333333',
+                  border: '#E53935',
                 },
                 margin: 10,
             },
             edges: {
                 width: 2,
                 color: {
-                    color: '#4b5563',
-                    highlight: '#3b82f6',
-                    hover: '#4b5563',
+                    color: '#757575',
+                    highlight: '#E53935',
+                    hover: '#757575',
                 },
                 smooth: {
                     type: 'cubicBezier'
@@ -228,11 +229,11 @@ const AgentGraphVisualizer: React.FC<{ taskType: TaskType }> = ({ taskType }) =>
         
         const nodesUpdate = graphData.nodes.map((node, index) => ({
             id: node.id,
-            color: activeStep > index ? '#2563eb' : '#4b5563',
+            color: activeStep > index ? '#E53935' : '#333333',
         }));
         const edgesUpdate = graphData.edges.map((edge, index) => ({
             id: `${edge.from}_${edge.to}`, // visjs needs edge ids for updates
-            color: activeStep > index + 1 ? '#2563eb' : '#4b5563',
+            color: activeStep > index + 1 ? '#E53935' : '#757575',
         }));
 
         networkRef.current.body.data.nodes.update(nodesUpdate);
@@ -241,11 +242,11 @@ const AgentGraphVisualizer: React.FC<{ taskType: TaskType }> = ({ taskType }) =>
     }, [activeStep, graphData]);
 
     if (!graphData) {
-        return <div className="p-3 text-gray-400 text-sm">Initializing...</div>;
+        return <div className="p-3 text-foreground/70 text-sm">Initializing...</div>;
     }
 
     return (
-        <div className="p-3 bg-gray-700/50 rounded-lg">
+        <div className="p-3 bg-card/50 rounded-sm">
             <div ref={containerRef} style={{ height: '120px' }} />
         </div>
     );
@@ -255,23 +256,23 @@ const Header: React.FC<{
   persona: Persona;
   onPersonaChange: (persona: Persona) => void;
 }> = ({ persona, onPersonaChange }) => (
-  <header className="bg-gray-800/50 backdrop-blur-sm p-4 border-b border-gray-700 fixed top-0 left-0 right-0 z-10">
+  <header className="bg-card p-4 border-b border-border fixed top-0 left-0 right-0 z-10">
     <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
       <div className="flex items-center space-x-3">
-        <BrainCircuitIcon className="h-8 w-8 text-cyan-400" />
-        <h1 className="text-xl font-bold text-gray-100">{APP_TITLE}</h1>
+        <RouterIcon className="h-8 w-8 text-accent" />
+        <h1 className="text-xl font-bold text-foreground font-sans">{APP_TITLE}</h1>
       </div>
       <div className='flex flex-col items-center gap-2'>
-        <div className="flex items-center bg-gray-900 rounded-lg p-1">
-          <span className="text-xs text-gray-400 px-2">Persona:</span>
+        <div className="flex items-center bg-background rounded-sm p-1 border border-border">
+          <span className="text-xs text-foreground/70 px-2">Persona:</span>
           {Object.values(Persona).map((p) => (
             <button
               key={p}
               onClick={() => onPersonaChange(p)}
-              className={`px-2 py-1 text-xs font-medium rounded-md transition-colors duration-200 ${
+              className={`px-2 py-1 text-xs font-medium rounded-sm transition-colors duration-200 ${
                 persona === p
-                  ? 'bg-blue-600/70 text-white'
-                  : 'text-gray-300 hover:bg-gray-700'
+                  ? 'bg-accent/80 text-white'
+                  : 'text-foreground/80 hover:bg-card'
               }`}
             >
               {p}
@@ -291,12 +292,12 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
     if (content.startsWith('Observation:\n')) {
         return (
             <div>
-                <div className="text-xs text-gray-400 px-4 py-2 border-b border-gray-700 flex items-center gap-2">
+                <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
                     <PerceptionIcon className="w-4 h-4" />
                     Observation
                 </div>
-                <pre className="p-4 text-sm text-gray-200 overflow-x-auto">
-                    <code>{content.replace('Observation:\n', '')}</code>
+                <pre className="p-4 text-sm text-foreground overflow-x-auto">
+                    <code className="font-mono">{content.replace('Observation:\n', '')}</code>
                 </pre>
             </div>
         );
@@ -313,26 +314,26 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
             // Custom renderer for code_interpreter
             if (call.name === 'code_interpreter' && call.args.code) {
                 return (
-                    <div key={index} className="bg-gray-900 rounded-md my-2">
-                        <div className="text-xs text-gray-400 px-4 py-2 border-b border-gray-700 flex items-center gap-2">
+                    <div key={index} className="bg-background rounded-sm my-2 border border-border">
+                        <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
                             <CodeBracketIcon className="w-4 h-4" />
-                            Tool Call: <span className="font-semibold text-gray-200">code_interpreter</span>
+                            Tool Call: <span className="font-semibold text-foreground">{call.name}</span>
                         </div>
-                        <pre className="p-4 text-sm text-gray-200 overflow-x-auto">
-                            <code>{call.args.code}</code>
+                        <pre className="p-4 text-sm text-foreground overflow-x-auto">
+                            <code className="font-mono">{call.args.code}</code>
                         </pre>
                     </div>
                 )
             }
             // Default renderer for other function calls
             return (
-                <div key={index} className="bg-gray-900 rounded-md my-2">
-                    <div className="text-xs text-gray-400 px-4 py-2 border-b border-gray-700 flex items-center gap-2">
+                <div key={index} className="bg-background rounded-sm my-2 border border-border">
+                    <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
                         <CodeBracketIcon className="w-4 h-4" />
-                        Tool Call: <span className="font-semibold text-gray-200">{call.name}</span>
+                        Tool Call: <span className="font-semibold text-foreground">{call.name}</span>
                     </div>
-                    <pre className="p-4 text-sm text-gray-200 overflow-x-auto">
-                        <code>{JSON.stringify(call.args, null, 2)}</code>
+                    <pre className="p-4 text-sm text-foreground overflow-x-auto">
+                        <code className="font-mono">{JSON.stringify(call.args, null, 2)}</code>
                     </pre>
                 </div>
             )
@@ -343,13 +344,13 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
 
   const renderPlan = (plan: Plan) => (
     <div className="mt-2 space-y-3">
-        <h4 className="text-sm font-semibold text-gray-300">Generated Plan:</h4>
+        <h4 className="text-sm font-semibold text-foreground/80">Generated Plan:</h4>
         {plan.plan.map((step) => (
-            <div key={step.step_id} className="p-3 bg-gray-600/50 rounded-md">
-                <p className="font-semibold text-gray-200">Step {step.step_id}: {step.description}</p>
-                <div className="mt-2 text-xs space-y-1 text-gray-400">
-                    <p><span className="font-medium text-gray-300">Tool:</span> {step.tool_to_use}</p>
-                    <p><span className="font-medium text-gray-300">Acceptance Criteria:</span> {step.acceptance_criteria}</p>
+            <div key={step.step_id} className="p-3 bg-card/50 rounded-sm border border-border">
+                <p className="font-semibold text-foreground">Step {step.step_id}: {step.description}</p>
+                <div className="mt-2 text-xs space-y-1 text-foreground/70">
+                    <p><span className="font-medium text-foreground/80">Tool:</span> {step.tool_to_use}</p>
+                    <p><span className="font-medium text-foreground/80">Acceptance Criteria:</span> {step.acceptance_criteria}</p>
                 </div>
             </div>
         ))}
@@ -358,23 +359,23 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
 
   const renderCritique = (critique: CritiqueResult) => (
     <div className="mt-2 space-y-3">
-        <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2"><CritiqueIcon className="w-4 h-4" /> Self-Critique Result:</h4>
-        <div className="p-3 bg-gray-600/50 rounded-md">
+        <h4 className="text-sm font-semibold text-foreground/80 flex items-center gap-2"><CritiqueIcon className="w-4 h-4" /> Self-Critique Result:</h4>
+        <div className="p-3 bg-card/50 rounded-sm border border-border">
             <div className="flex justify-around text-center text-xs mb-2">
                 <div>
-                    <p className="font-bold text-gray-200">{critique.scores.faithfulness}/5</p>
-                    <p className="text-gray-400">Faithfulness</p>
+                    <p className="font-bold text-foreground">{critique.scores.faithfulness}/5</p>
+                    <p className="text-foreground/70">Faithfulness</p>
                 </div>
                 <div>
-                    <p className="font-bold text-gray-200">{critique.scores.coherence}/5</p>
-                    <p className="text-gray-400">Coherence</p>
+                    <p className="font-bold text-foreground">{critique.scores.coherence}/5</p>
+                    <p className="text-foreground/70">Coherence</p>
                 </div>
                 <div>
-                    <p className="font-bold text-gray-200">{critique.scores.coverage}/5</p>
-                    <p className="text-gray-400">Coverage</p>
+                    <p className="font-bold text-foreground">{critique.scores.coverage}/5</p>
+                    <p className="text-foreground/70">Coverage</p>
                 </div>
             </div>
-            <p className="text-xs text-gray-300 bg-gray-900/50 p-2 rounded-sm">{critique.critique}</p>
+            <p className="text-xs text-foreground/80 bg-background/50 p-2 rounded-sm">{critique.critique}</p>
         </div>
     </div>
 );
@@ -383,45 +384,45 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div className={`max-w-xl px-1 ${isUser ? 'order-2' : 'order-1 flex items-start space-x-3'}`}>
         {!isUser && (
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex-shrink-0 mt-1"></div>
+          <div className="w-8 h-8 rounded-sm bg-accent flex-shrink-0 mt-1"></div>
         )}
-        <div className={`rounded-lg px-4 py-3 ${isUser ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200'}`}>
-          <div className="prose prose-invert prose-sm max-w-none">
+        <div className={`rounded-sm px-4 py-3 ${isUser ? 'bg-user-bubble text-foreground' : 'bg-card text-foreground'}`}>
+          <div className="prose prose-invert prose-sm max-w-none text-foreground">
             {message.plan ? renderPlan(message.plan) 
               : message.functionCalls ? renderFunctionCalls(message.functionCalls)
               : message.critique ? renderCritique(message.critique)
               : renderContent(message.content)}
           </div>
           {message.file && (
-            <div className="mt-2 p-2 bg-gray-600/50 rounded-md text-xs">
+            <div className="mt-2 p-2 bg-card/50 rounded-sm text-xs">
               Attached: {message.file.name} ({message.file.type})
             </div>
           )}
           {message.repo && (
-              <div className="mt-2 p-2 bg-gray-600/50 rounded-md text-xs">
+              <div className="mt-2 p-2 bg-card/50 rounded-sm text-xs">
                 <div className="flex items-center space-x-2">
-                  <GitHubIcon className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                  <a href={message.repo.url} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline truncate">
+                  <GitHubIcon className="w-4 h-4 text-foreground/80 flex-shrink-0" />
+                  <a href={message.repo.url} target="_blank" rel="noopener noreferrer" className="text-accent/80 hover:underline truncate">
                     Attached Repo: {message.repo.owner}/{message.repo.repo}
                   </a>
                 </div>
                 {message.repo.fileTree && isUser && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-gray-400">View File Tree</summary>
-                    <pre className="mt-1 p-2 bg-gray-900/50 rounded-sm text-gray-300 text-xs overflow-auto max-h-40">
-                      <code>{message.repo.fileTree}</code>
+                    <summary className="cursor-pointer text-foreground/70">View File Tree</summary>
+                    <pre className="mt-1 p-2 bg-background/50 rounded-sm text-foreground/80 text-xs overflow-auto max-h-40">
+                      <code className="font-mono">{message.repo.fileTree}</code>
                     </pre>
                   </details>
                 )}
                 {message.repo.error && (
-                   <p className="mt-1 text-red-400">Error: {message.repo.error}</p>
+                   <p className="mt-1 text-accent">Error: {message.repo.error}</p>
                 )}
               </div>
             )}
           {message.isLoading && message.taskType && <div className="mt-2 w-full"><AgentGraphVisualizer taskType={message.taskType} /></div>}
           {message.sources && message.sources.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-600/50">
-              <h4 className="text-xs font-semibold text-gray-400 mb-2">Sources:</h4>
+            <div className="mt-3 pt-3 border-t border-border">
+              <h4 className="text-xs font-semibold text-foreground/70 mb-2">Sources:</h4>
               <div className="flex flex-wrap gap-2">
                 {message.sources.map((source, index) => (
                   <a
@@ -429,7 +430,7 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
                     href={source.uri}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs bg-gray-600 hover:bg-gray-500 text-cyan-300 px-2 py-1 rounded-md transition-colors"
+                    className="text-xs bg-card hover:bg-border text-accent/90 px-2 py-1 rounded-sm transition-colors"
                   >
                     {source.title || new URL(source.uri).hostname}
                   </a>
@@ -526,45 +527,45 @@ const ChatInput: React.FC<{
 
   return (
     <div 
-      className={`bg-gray-800 p-4 border-t border-gray-700 transition-all duration-300 ${isDragging ? 'border-blue-500 ring-2 ring-blue-500' : ''}`}
+      className={`bg-card p-4 border-t border-border transition-all duration-300 ${isDragging ? 'border-accent ring-2 ring-accent' : ''}`}
       onDragEnter={(e) => handleDragEvents(e, true)}
       onDragLeave={(e) => handleDragEvents(e, false)}
       onDragOver={(e) => handleDragEvents(e, true)}
       onDrop={handleDrop}
     >
       {isDragging && (
-        <div className="pointer-events-none absolute inset-0 bg-blue-500/10 flex items-center justify-center">
-            <p className="text-blue-400 font-semibold">Drop file or GitHub repository link</p>
+        <div className="pointer-events-none absolute inset-0 bg-accent/10 flex items-center justify-center">
+            <p className="text-accent/80 font-semibold">Drop file or GitHub repository link</p>
         </div>
       )}
       <div className="max-w-4xl mx-auto">
         {file && (
-          <div className="mb-2 flex items-center justify-between bg-gray-700 px-3 py-1.5 rounded-md">
-            <span className="text-sm text-gray-300">
-              Attached File: <span className="font-medium text-gray-100">{file.name}</span>
+          <div className="mb-2 flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border">
+            <span className="text-sm text-foreground/80">
+              Attached File: <span className="font-medium text-foreground">{file.name}</span>
             </span>
-            <button onClick={() => { setFile(null); setIsVisionMode(false); }} className="text-gray-400 hover:text-white">
+            <button onClick={() => { setFile(null); setIsVisionMode(false); }} className="text-foreground/70 hover:text-white">
               <XCircleIcon />
             </button>
           </div>
         )}
         {repoUrl && (
-          <div className="mb-2 flex items-center justify-between bg-gray-700 px-3 py-1.5 rounded-md">
+          <div className="mb-2 flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border">
             <div className="flex items-center space-x-2 overflow-hidden">
-                <GitHubIcon className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                <span className="text-sm text-gray-300 truncate">
-                Repo: <span className="font-medium text-gray-100">{repoUrl.replace('https://github.com/', '')}</span>
+                <GitHubIcon className="w-4 h-4 text-foreground/80 flex-shrink-0" />
+                <span className="text-sm text-foreground/80 truncate">
+                Repo: <span className="font-medium text-foreground">{repoUrl.replace('https://github.com/', '')}</span>
                 </span>
             </div>
-            <button onClick={() => setRepoUrl(null)} className="text-gray-400 hover:text-white">
+            <button onClick={() => setRepoUrl(null)} className="text-foreground/70 hover:text-white">
               <XCircleIcon />
             </button>
           </div>
         )}
-        <div className="flex items-center bg-gray-900 rounded-lg p-2">
+        <div className="flex items-center bg-background rounded-sm p-2 border border-border">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-gray-400 hover:text-white transition-colors"
+            className="p-2 text-foreground/70 hover:text-white transition-colors"
             aria-label="Attach file"
           >
             <PaperclipIcon />
@@ -587,14 +588,14 @@ const ChatInput: React.FC<{
             }}
             onPaste={handlePaste}
             placeholder={placeholderText}
-            className="flex-grow bg-transparent text-gray-200 placeholder-gray-500 focus:outline-none resize-none px-3"
+            className="flex-grow bg-transparent text-foreground placeholder-foreground/50 focus:outline-none resize-none px-3 font-mono"
             rows={1}
             disabled={isLoading || !isPyodideReady}
           />
           <button
             onClick={handleSubmit}
             disabled={isLoading || isSendDisabled}
-            className="p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed enabled:bg-blue-600 enabled:hover:bg-blue-700 text-white"
+            className="p-2 rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed enabled:bg-accent enabled:hover:bg-accent/80 text-white"
             aria-label="Send message"
           >
             <SendIcon />
@@ -870,14 +871,14 @@ const App: React.FC = () => {
   }, [isLoading, ai, persona, messages, isPyodideReady]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-gray-900 text-gray-100 font-sans">
+    <div className="h-screen w-screen flex flex-col bg-background text-foreground font-mono">
       <Header persona={persona} onPersonaChange={handlePersonaChange} />
       <main className="flex-1 overflow-y-auto pt-32 pb-4">
         <div className="max-w-4xl mx-auto px-4">
           {messages.length === 0 && !isLoading ? (
-            <div className="text-center text-gray-400 mt-8">
-              <h2 className="text-2xl font-semibold mb-2">Agentic AI Chat</h2>
-              <p className="text-sm">Your intelligent assistant swarm. How can I help you today?</p>
+            <div className="text-center text-foreground/70 mt-8">
+              <h2 className="text-2xl font-semibold mb-2 font-sans">Agentura AI</h2>
+              <p className="text-sm">A specialized agent swarm. State your objective.</p>
             </div>
           ) : (
             <>
@@ -885,12 +886,12 @@ const App: React.FC = () => {
               <div ref={messagesEndRef} />
             </>
           )}
-          {error && <div className="text-red-400 text-center p-4 bg-red-900/50 rounded-lg">{error}</div>}
+          {error && <div className="text-accent text-center p-4 bg-accent/20 rounded-sm border border-accent/50">{error}</div>}
         </div>
       </main>
       <footer className="sticky bottom-0 left-0 right-0">
           <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} isPyodideReady={isPyodideReady}/>
-          <div className="text-xs text-center text-gray-500 py-1 bg-gray-800">
+          <div className="text-xs text-center text-foreground/50 py-1 bg-card">
             Python Environment: {isPyodideReady ? 'Ready' : 'Loading...'}
           </div>
       </footer>

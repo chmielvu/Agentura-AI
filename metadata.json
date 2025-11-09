@@ -1,5 +1,5 @@
 {
-  "name": "Agentic AI Chat",
-  "description": "An advanced agentic chatbot that leverages multiple Gemini models to perform a variety of tasks including general chat, grounded research, and complex reasoning with a special thinking mode. Users can upload files for content analysis.",
+  "name": "Agentura AI",
+  "description": "An AI assistant inspired by the stark, utilitarian aesthetics of a bygone era. Agentura AI uses a swarm of specialized agents to execute complex tasks with rigorous, process-driven analysis.",
   "requestFramePermissions": []
 }

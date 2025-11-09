@@ -1,0 +1,5 @@
+{
+  "name": "Agentic AI Chat",
+  "description": "An advanced agentic chatbot that leverages multiple Gemini models to perform a variety of tasks including general chat, grounded research, and complex reasoning with a special thinking mode. Users can upload files for content analysis.",
+  "requestFramePermissions": []
+}

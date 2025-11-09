@@ -8,6 +8,7 @@ export enum TaskType {
   Vision = 'Vision',
   Code = 'Code',
   Creative = 'Creative',
+  Critique = 'Critique',
 }
 
 export enum Persona {
@@ -45,6 +46,17 @@ export interface FunctionCall {
     args: Record<string, any>;
 }
 
+export interface CritiqueScores {
+  faithfulness: number;
+  coherence: number;
+  coverage: number;
+}
+
+export interface CritiqueResult {
+  scores: CritiqueScores;
+  critique: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -58,6 +70,7 @@ export interface ChatMessage {
   isLoading?: boolean;
   plan?: Plan;
   functionCalls?: FunctionCall[];
+  critique?: CritiqueResult;
   taskType?: TaskType; // Used for visualization of the loading message
 }
 

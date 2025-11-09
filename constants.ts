@@ -16,6 +16,11 @@ export const TASK_CONFIGS = {
     description: 'Uses Google Search for up-to-date, accurate information.',
     config: {
       tools: [{googleSearch: {}}],
+      systemInstruction: { parts: [{ text: 
+          `You are a Research Agent using Corrective-Augmented Generation (CRAG). 
+          For every finding, you must check the source confidence. If a source appears low-trust (e.g., a non-official blog), you MUST perform a 'corrective action' by running a follow-up search for a primary, high-confidence source (e.g., an official press release or academic paper) before synthesizing the answer.
+          Your final output MUST cite all sources.` 
+      }] },
     },
   },
   [TaskType.Complex]: {
@@ -43,7 +48,11 @@ export const TASK_CONFIGS = {
               properties: {
                 step_id: { type: Type.NUMBER, description: "The step number." },
                 description: { type: Type.STRING, description: "A description of the action to be taken in this step." },
-                tool_to_use: { type: Type.STRING, description: "The tool to be used for this step, e.g., 'web_search_tool' or 'none'." },
+                tool_to_use: { 
+                    type: Type.STRING, 
+                    description: "The tool to be used for this step. Must be a valid tool name.",
+                    enum: ['code_interpreter', 'veo_tool', 'musicfx_tool', 'googleSearch', 'none'], 
+                },
                 acceptance_criteria: { type: Type.STRING, description: "The criteria to verify this step is completed successfully." },
               },
               required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
@@ -117,7 +126,37 @@ export const TASK_CONFIGS = {
         ]
       }]
     }
-  }
+  },
+  [TaskType.Critique]: {
+    model: 'gemini-2.5-pro',
+    title: 'Self-Critique & Refine',
+    description: 'The Critic agent evaluates outputs for faithfulness, coherence, and coverage.',
+    config: {
+        responseMimeType: "application/json",
+        systemInstruction: { parts: [{ text: 
+            `You are a Critic agent. Your task is to evaluate a tool execution output against the original user query.
+            You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5).
+            Provide a detailed, actionable critique.` 
+        }] },
+        responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+                scores: { 
+                    type: Type.OBJECT,
+                    description: "The evaluation scores based on the rubric.",
+                    properties: { 
+                        faithfulness: { type: Type.NUMBER, description: "1=hallucination, 5=faithful." }, 
+                        coherence: { type: Type.NUMBER, description: "1=illogical, 5=rigorous." }, 
+                        coverage: { type: Type.NUMBER, description: "1=incomplete, 5=addressed all parts." }
+                    },
+                    required: ['faithfulness', 'coherence', 'coverage']
+                },
+                critique: { type: Type.STRING, description: "A detailed, actionable critique and suggestions for revision, citing specific flaws." },
+            },
+            required: ['scores', 'critique'],
+        },
+    },
+  },
 };
 
 export const PERSONA_CONFIGS: Record<Persona, { instruction: string }> = {
@@ -144,7 +183,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             route: {
                 type: Type.STRING,
                 description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType),
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique),
             },
         },
         required: ['route'],

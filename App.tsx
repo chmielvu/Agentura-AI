@@ -1,7 +1,9 @@
 
+
+
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, FunctionDeclaration, Content } from '@google/genai';
-import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall } from './types';
+import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall, CritiqueResult } from './types';
 import { APP_TITLE, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_TOOL } from './constants';
 import { SendIcon, PaperclipIcon, BrainCircuitIcon, XCircleIcon, UserIcon, SearchIcon, GitHubIcon, RouterIcon, OptimizeIcon, CritiqueIcon, PerceptionIcon, PlanIcon, GenerateIcon, ImageIcon, CodeBracketIcon, SparklesIcon } from './components/Icons';
 
@@ -53,7 +55,7 @@ const iconSvgs = {
 };
 
 // --- Child Components ---
-const agentGraphConfigs: Record<TaskType, { nodes: any[], edges: any[] }> = {
+const agentGraphConfigs: Record<string, { nodes: any[], edges: any[] }> = {
     [TaskType.Chat]: {
         nodes: [
             { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
@@ -111,11 +113,12 @@ const agentGraphConfigs: Record<TaskType, { nodes: any[], edges: any[] }> = {
             { id: 1, label: 'User Input', image: svgToDataURI(iconSvgs.UserIcon), shape: 'image' },
             { id: 2, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon), shape: 'image' },
             { id: 3, label: 'Code Agent', image: svgToDataURI(iconSvgs.CodeBracketIcon), shape: 'image' },
-            { id: 4, label: 'PoT: Code Gen', image: svgToDataURI(iconSvgs.GenerateIcon), shape: 'image' },
-            { id: 5, label: 'Execute & Observe', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
-            { id: 6, label: 'Output: Result', image: svgToDataURI(iconSvgs.CodeBracketIcon, '#67e8f9'), shape: 'image' },
+            { id: 4, label: 'Action: Code Gen', image: svgToDataURI(iconSvgs.GenerateIcon), shape: 'image' },
+            { id: 5, label: 'Observation', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
+            { id: 6, label: 'Critique', image: svgToDataURI(iconSvgs.CritiqueIcon), shape: 'image' },
+            { id: 7, label: 'Final Answer', image: svgToDataURI(iconSvgs.BrainCircuitIcon, '#67e8f9'), shape: 'image' },
         ],
-        edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 }],
+        edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 }, { from: 6, to: 7 }],
     },
     [TaskType.Creative]: {
         nodes: [
@@ -126,6 +129,15 @@ const agentGraphConfigs: Record<TaskType, { nodes: any[], edges: any[] }> = {
             { id: 5, label: 'Output: Plan', image: svgToDataURI(iconSvgs.SparklesIcon, '#67e8f9'), shape: 'image' },
         ],
         edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }, { from: 4, to: 5 }],
+    },
+    [TaskType.Critique]: {
+        nodes: [
+            { id: 1, label: 'Tool Output', image: svgToDataURI(iconSvgs.PerceptionIcon), shape: 'image' },
+            { id: 2, label: 'Critic Agent', image: svgToDataURI(iconSvgs.CritiqueIcon), shape: 'image' },
+            { id: 3, label: 'Analysis', image: svgToDataURI(iconSvgs.BrainCircuitIcon), shape: 'image' },
+            { id: 4, label: 'Output: Scores', image: svgToDataURI(iconSvgs.CritiqueIcon, '#67e8f9'), shape: 'image' },
+        ],
+        edges: [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }],
     },
 };
 
@@ -342,6 +354,29 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
             </div>
         ))}
     </div>
+  );
+
+  const renderCritique = (critique: CritiqueResult) => (
+    <div className="mt-2 space-y-3">
+        <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2"><CritiqueIcon className="w-4 h-4" /> Self-Critique Result:</h4>
+        <div className="p-3 bg-gray-600/50 rounded-md">
+            <div className="flex justify-around text-center text-xs mb-2">
+                <div>
+                    <p className="font-bold text-gray-200">{critique.scores.faithfulness}/5</p>
+                    <p className="text-gray-400">Faithfulness</p>
+                </div>
+                <div>
+                    <p className="font-bold text-gray-200">{critique.scores.coherence}/5</p>
+                    <p className="text-gray-400">Coherence</p>
+                </div>
+                <div>
+                    <p className="font-bold text-gray-200">{critique.scores.coverage}/5</p>
+                    <p className="text-gray-400">Coverage</p>
+                </div>
+            </div>
+            <p className="text-xs text-gray-300 bg-gray-900/50 p-2 rounded-sm">{critique.critique}</p>
+        </div>
+    </div>
 );
 
   return (
@@ -354,6 +389,7 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
           <div className="prose prose-invert prose-sm max-w-none">
             {message.plan ? renderPlan(message.plan) 
               : message.functionCalls ? renderFunctionCalls(message.functionCalls)
+              : message.critique ? renderCritique(message.critique)
               : renderContent(message.content)}
           </div>
           {message.file && (
@@ -590,7 +626,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isPyodideReady, setIsPyodideReady] = useState(false);
   const pyodideRef = useRef<any>(null);
-  const chatRef = useRef<Chat | null>(null);
+  // FIX: Extend Chat type to hold session metadata (_persona, _taskType)
+  const chatRef = useRef<(Chat & { _persona?: Persona, _taskType?: TaskType }) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
@@ -731,55 +768,96 @@ const App: React.FC = () => {
       const parts: Part[] = [{ text: analysisPrompt }];
       if (file) parts.push(fileToGenerativePart(file));
       
-      const taskConfig = TASK_CONFIGS[routedTask];
-      if (!chatRef.current) {
-        let systemInstruction = [PERSONA_CONFIGS[persona].instruction];
-        const configWithMaybeInstruction = taskConfig.config as any;
-        if(configWithMaybeInstruction.systemInstruction) {
-            systemInstruction.push(configWithMaybeInstruction.systemInstruction.parts[0].text);
-        }
-        
-        const history: Content[] = messages.map(msg => ({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content }] // Simplified history
-        }));
+      const newTaskConfig = TASK_CONFIGS[routedTask];
 
-        chatRef.current = ai.chats.create({
-          model: taskConfig.model,
-          config: {
-            ...taskConfig.config,
-            ...(systemInstruction.filter(Boolean).length > 0 && { systemInstruction: { parts: [{ text: systemInstruction.join('\n\n') }] } }),
-          },
-          history
-        });
+      // FIX: Avoid accessing private `model` and `config` properties.
+      // Instead, check if the task type or persona has changed to decide if a new chat session is needed.
+      const isConfigChange = 
+          !chatRef.current || 
+          chatRef.current._taskType !== routedTask ||
+          persona !== chatRef.current?._persona;
+
+      if (isConfigChange) {
+          const history: Content[] = messages.map(msg => ({
+              role: msg.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: msg.content }] // Simplified history
+          }));
+
+          let systemInstruction = [PERSONA_CONFIGS[persona].instruction];
+          const configWithMaybeInstruction = newTaskConfig.config as any;
+          if (configWithMaybeInstruction.systemInstruction) {
+              systemInstruction.push(configWithMaybeInstruction.systemInstruction.parts[0].text);
+          }
+          
+          // FIX: Add _taskType to the extended Chat type and set it after creation.
+          chatRef.current = ai.chats.create({
+              model: newTaskConfig.model,
+              config: {
+                  ...newTaskConfig.config,
+                  ...(systemInstruction.filter(Boolean).length > 0 && { systemInstruction: { parts: [{ text: systemInstruction.join('\n\n') }] } }),
+              },
+              history
+          }) as Chat & { _persona?: Persona, _taskType?: TaskType };
+          chatRef.current._persona = persona;
+          chatRef.current._taskType = routedTask;
       }
+      
 
       // 3. First Turn (User -> Model)
-      // FIX: The `sendMessageStream` method expects a `message` property, not `parts`.
+      // FIX: Correct the payload for sendMessageStream. The `message` property should directly receive the array of parts.
       const stream1 = await chatRef.current.sendMessageStream({ message: parts });
       const { functionCalls } = await processStream(stream1, assistantMessageId);
 
-      setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
-
-      // 4. Handle Tool Call if present
+      // 4. Handle Tool Call (PWC Loop for Code Agent)
       if (functionCalls && functionCalls.length > 0 && functionCalls[0].name === 'code_interpreter') {
           const code = functionCalls[0].args.code;
-          const output = await runPythonCode(code);
-          
-          const observationMessageId = (Date.now() + 2).toString();
-          setMessages(prev => [...prev, { id: observationMessageId, role: 'assistant', content: `Observation:\n${output}` }]);
-          
-          const finalAnswerId = (Date.now() + 3).toString();
-          setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask }]);
 
-          const toolParts: Part[] = [{
-              functionResponse: { name: 'code_interpreter', response: { content: output } }
-          }];
+          // Worker Phase
+          const observationMessageId = (Date.now() + 2).toString();
+          setMessages(prev => [...prev, { id: observationMessageId, role: 'assistant', content: `Executing code...`, isLoading: true, taskType: TaskType.Code }]);
+          const output = await runPythonCode(code);
+          setMessages(prev => prev.map(msg => msg.id === observationMessageId ? { ...msg, content: `Observation:\n${output}`, isLoading: false } : msg));
+
+          // Critic Phase
+          const critiqueMessageId = (Date.now() + 3).toString();
+          setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique }]);
           
-          // FIX: The `sendMessageStream` method expects a `message` property, not `parts`.
-          const stream2 = await chatRef.current.sendMessageStream({ message: toolParts });
-          await processStream(stream2, finalAnswerId);
-          setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
+          const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
+          const outputForCritique = `Original Query: ${prompt}\nTool Output: ${output}`;
+
+          const critiqueResponse = await ai.models.generateContent({
+              model: critiqueConfig.model,
+              contents: { parts: [{ text: outputForCritique }] },
+              config: critiqueConfig.config as any,
+          });
+
+          let critiqueResult: CritiqueResult | null = null;
+          try {
+            critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
+          } catch(e) {
+            console.error("Failed to parse critique response", e);
+            setError("The critic agent provided a malformed response.");
+          }
+          
+          setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
+          
+          const { faithfulness, coherence, coverage } = critiqueResult?.scores || {};
+          if (critiqueResult && faithfulness >= 4 && coherence >= 4 && coverage >= 4) {
+              // Synthesis Phase
+              const finalAnswerId = (Date.now() + 4).toString();
+              setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask }]);
+              
+              const toolParts: Part[] = [{ functionResponse: { name: 'code_interpreter', response: { content: output } } }];
+              
+              // FIX: Correct the payload for sendMessageStream.
+              const stream2 = await chatRef.current!.sendMessageStream({ message: toolParts });
+              await processStream(stream2, finalAnswerId);
+              setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
+          } else {
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
+          }
+      } else {
+        setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
       }
 
     } catch (e) {

@@ -98,9 +98,13 @@ export interface FileData {
   content: string; // base64 encoded
 }
 
+export interface AgenticState {
+  activePlanId?: string;
+  currentPlanStepId?: number;
+}
+
 export interface SessionState {
   version: string;
   messages: ChatMessage[];
-  // agenticState might be used in the future for more complex resumability
-  agenticState: {};
+  agenticState: AgenticState;
 }

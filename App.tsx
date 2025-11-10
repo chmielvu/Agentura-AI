@@ -13,7 +13,8 @@ const App: React.FC = () => {
   const [isPyodideReady, setIsPyodideReady] = useState(false);
   const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
 
-  const { messages, setMessages, isLoading, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, pyodideRef);
+  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, pyodideRef);
+  const { messages, isLoading } = state;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);

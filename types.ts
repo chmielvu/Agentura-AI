@@ -1,5 +1,3 @@
-
-
 export enum TaskType {
   Chat = 'Chat',
   Research = 'Research',
@@ -36,9 +34,13 @@ export interface PlanStep {
   description: string;
   tool_to_use: string;
   acceptance_criteria: string;
+  // New fields for execution tracking
+  status?: 'pending' | 'in-progress' | 'completed' | 'failed';
+  result?: string;
 }
 
 export interface Plan {
+  id: string;
   plan: PlanStep[];
 }
 

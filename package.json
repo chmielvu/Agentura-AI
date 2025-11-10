@@ -11,7 +11,10 @@
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "@google/genai": "^1.29.0"
+    "@google/genai": "^1.29.0",
+    "zod": "^4.1.12",
+    "@genkit-ai/googleai": "^1.22.0",
+    "@genkit-ai/flow": "^0.5.17"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

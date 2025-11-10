@@ -1,0 +1,67 @@
+import { TaskType } from '../../types';
+
+const svgToDataURI = (svgString: string, color: string = '#E0E0E0'): string => {
+    const coloredSvg = svgString.replace(/currentColor/g, color);
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(coloredSvg)}`;
+};
+
+export const iconSvgs = {
+    UserIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>`,
+    RouterIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 21v-1.5M15.75 3v1.5M15.75 21v-1.5" /><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 6.375h13.5c.621 0 1.125.504 1.125 1.125v9c0 .621-.504 1.125-1.125 1.125H5.25c-.621 0-1.125-.504-1.125-1.125v-9c0-.621.504-1.125 1.125-1.125z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 8.25v7.5" /></svg>`,
+    BrainCircuitIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.624L16.5 21.75l-.398-1.126a3.375 3.375 0 00-2.456-2.456L12.75 18l1.126-.398a3.375 3.375 0 002.456-2.456L16.5 14.25l.398 1.126a3.375 3.375 0 002.456 2.456L20.25 18l-1.126.398a3.375 3.375 0 00-2.456 2.456z" /></svg>`,
+    SearchIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>`,
+    CritiqueIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+    PerceptionIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639l4.43-7.532a1.012 1.012 0 011.638 0l4.43 7.532a1.012 1.012 0 010 .639l-4.43 7.532a1.012 1.012 0 01-1.638 0l-4.43-7.532z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>`,
+    PlanIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`,
+    GenerateIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>`,
+    CodeBracketIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" /></svg>`,
+    SparklesIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.624L16.5 21.75l-.398-1.126a3.375 3.375 0 00-2.456-2.456L12.75 18l1.126-.398a3.375 3.375 0 002.456-2.456L16.5 14.25l.398 1.126a3.375 3.375 0 002.456 2.456L20.25 18l-1.126.398a3.375 3.375 0 00-2.456 2.456z" /></svg>`,
+    OptimizeIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h18M7.5 4.5v5.25l-4.5 4.5v3h15v-3l-4.5-4.5V4.5" /></svg>`,
+};
+
+const defaultColor = '#757575';
+export const agentGraphConfigs: Record<string, { nodes: any[], edges: any[] }> = {
+    [TaskType.Chat]: {
+        nodes: [{ id: 1, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, defaultColor) }, { id: 2, label: 'Chat', image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor) }],
+        edges: [{ from: 1, to: 2, id: '1_2' }],
+    },
+    [TaskType.Code]: {
+        nodes: [
+            { id: 1, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, defaultColor) },
+            { id: 2, label: 'Code Gen', image: svgToDataURI(iconSvgs.CodeBracketIcon, defaultColor) },
+            { id: 3, label: 'Execute', image: svgToDataURI(iconSvgs.PerceptionIcon, defaultColor) },
+            { id: 4, label: 'Critique', image: svgToDataURI(iconSvgs.CritiqueIcon, defaultColor) },
+            { id: 5, label: 'Synthesize', image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor) },
+        ],
+        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }, { from: 4, to: 5, id: '4_5' }],
+    },
+    // ... other task types would be defined similarly
+    [TaskType.Research]: {
+        nodes: [{id:1, label:'Router'}, {id:2, label:'Search'}, {id:3, label:'Critique'}, {id:4, label:'Synthesize'}].map(n => ({...n, image: svgToDataURI(iconSvgs.SearchIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }],
+    },
+    [TaskType.Complex]: {
+        nodes: [{id:1, label:'Router'}, {id:2, label:'Generate v1'}, {id:3, label:'Critique'}, {id:4, label:'Synthesize v2'}].map(n => ({...n, image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }],
+    },
+    [TaskType.Planner]: {
+        nodes: [{id:1, label:'Router'}, {id:2, label:'Plan'}].map(n => ({...n, image: svgToDataURI(iconSvgs.PlanIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }],
+    },
+    [TaskType.Vision]: {
+        nodes: [{id:1, label:'Router'}, {id:2, label:'Analyze'}].map(n => ({...n, image: svgToDataURI(iconSvgs.PerceptionIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }],
+    },
+    [TaskType.Creative]: {
+        nodes: [{id:1, label:'Router'}, {id:2, label:'Create'}, {id:3, label:'Tool Call'}].map(n => ({...n, image: svgToDataURI(iconSvgs.SparklesIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }],
+    },
+    [TaskType.Critique]: {
+        nodes: [{id:1, label:'Analyze'}].map(n => ({...n, image: svgToDataURI(iconSvgs.CritiqueIcon, defaultColor)})),
+        edges: [],
+    },
+    [TaskType.Retry]: {
+        nodes: [{id:1, label:'Critique'}, {id:2, label:'APO Refine'}, {id:3, label:'Re-run'}].map(n => ({...n, image: svgToDataURI(iconSvgs.OptimizeIcon, defaultColor)})),
+        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }],
+    }
+};

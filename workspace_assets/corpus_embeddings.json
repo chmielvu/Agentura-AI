@@ -1,0 +1,6 @@
+{
+  "doc1_rag_sample.md": {
+    "text": "An agentic AI system is a program that can perceive its environment...",
+    "embedding": [0.01, -0.02, ..., 0.03]
+  }
+}

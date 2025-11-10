@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall, CritiqueResult } from './types';
-import { APP_TITLE, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_TOOL } from './constants';
+import { APP_TITLE, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_TOOL, ROUTER_SYSTEM_INSTRUCTION } from './constants';
 import { SendIcon, PaperclipIcon, BrainCircuitIcon, XCircleIcon, UserIcon, SearchIcon, GitHubIcon, RouterIcon, OptimizeIcon, CritiqueIcon, PerceptionIcon, PlanIcon, GenerateIcon, ImageIcon, CodeBracketIcon, SparklesIcon } from './components/Icons';
 import DebuggerModal from './components/Debugger';
 
@@ -633,9 +633,6 @@ const useAgentChat = (
     const [error, setError] = useState<string | null>(null);
     const chatRef = useRef<(Chat & { _persona?: Persona, _taskType?: TaskType }) | null>(null);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
-    
-    // Store pending PWC loop continuations
-    const pwcContinuationRef = useRef<Record<string, (output: string) => void>>({});
   
     useEffect(() => {
       try {
@@ -661,7 +658,7 @@ const useAgentChat = (
         }
     };
   
-    const processStream = async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string, routedTask: TaskType) => {
+    const processStream = useCallback(async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string, routedTask: TaskType) => {
         let fullText = '';
         let sources: GroundingSource[] = [];
         let parsedPlan: Plan | undefined;
@@ -678,9 +675,15 @@ const useAgentChat = (
           
           const metadata = chunk.candidates?.[0]?.groundingMetadata as GroundingMetadata | undefined;
           if (metadata?.groundingChunks) {
-            sources = metadata.groundingChunks
+            const newSources = metadata.groundingChunks
               .map(c => c.web).filter((web): web is { uri: string, title: string } => !!web?.uri)
               .map(web => ({ uri: web.uri, title: web.title || '' }));
+
+             newSources.forEach(ns => {
+                if (!sources.some(s => s.uri === ns.uri)) {
+                    sources.push(ns);
+                }
+            });
           }
 
           setMessages(prev => prev.map(msg => 
@@ -698,7 +701,7 @@ const useAgentChat = (
         }
 
         return { fullText, sources, parsedPlan, functionCalls };
-    };
+    }, []);
 
     const continuePwcLoop = useCallback(async (
         codeOutput: string,
@@ -740,7 +743,45 @@ const useAgentChat = (
         
         setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
         
-        // Synthesis / Reflexion Phase
+        // Reflexion / Retry Phase
+        if (critiqueResult && critiqueResult.scores.faithfulness < 4) {
+            const retryMessageId = (Date.now() + 4).toString();
+            setMessages(prev => [...prev, { id: retryMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Retry, currentStep: 1 }]);
+            
+            const retryPrompt = `Your previous code attempt failed the critique. You MUST fix it.
+            
+CRITIQUE:
+${critiqueResult.critique}
+            
+SCORES:
+- Faithfulness: ${critiqueResult.scores.faithfulness}/5
+- Coherence: ${critiqueResult.scores.coherence}/5
+- Coverage: ${critiqueResult.scores.coverage}/5
+            
+ORIGINAL QUERY:
+${userPrompt}
+            
+Provide the corrected code using the 'code_interpreter' tool.`;
+
+            const streamRetry = await chatRef.current!.sendMessageStream({ message: [{ text: retryPrompt }] });
+            const { functionCalls: retryFunctionCalls } = await processStream(streamRetry, retryMessageId, TaskType.Code);
+            
+            if (retryFunctionCalls && retryFunctionCalls.length > 0) {
+                setMessages(prev => prev.map(msg => {
+                    if (msg.id === retryMessageId) {
+                        return { ...msg, isLoading: false, functionCalls: msg.functionCalls?.map(fc => ({...fc, isAwaitingExecution: true})) };
+                    }
+                    return msg;
+                }));
+            } else {
+                 setMessages(prev => prev.map(msg => msg.id === retryMessageId ? { ...msg, isLoading: false, content: "Self-correction failed to produce new code." } : msg));
+            }
+            
+            setIsLoading(false);
+            return; // End the loop here, wait for new user interaction
+        }
+        
+        // Synthesis Phase (if critique passed)
         const finalAnswerId = (Date.now() + 4).toString();
         setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Code, currentStep: 1 }]);
         setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 7, isLoading: false } : msg));
@@ -757,7 +798,7 @@ const useAgentChat = (
         setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
 
         setIsLoading(false);
-    }, [ai]);
+    }, [ai, processStream, setIsLoading]);
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string) => {
         setIsLoading(true);
@@ -777,7 +818,7 @@ const useAgentChat = (
         const code = functionCall.args.code;
         const output = await runPythonCode(code);
         
-        const userMessage = messages.find(m => m.role === 'user'); // simplistic way to find original prompt
+        const userMessage = messages.slice().reverse().find(m => m.role === 'user');
         await continuePwcLoop(output, messageId, userMessage?.content || '');
 
     }, [messages, runPythonCode, continuePwcLoop]);
@@ -805,8 +846,11 @@ const useAgentChat = (
           setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, currentStep: 1 }]);
           const routerResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: { parts: [{ text: `Classify the user's intent for the following query: "${prompt}"` }] },
-            config: { tools: [{ functionDeclarations: [ROUTER_TOOL] }] }
+            contents: { parts: [{ text: `Query: "${prompt}"` }] },
+            config: { 
+                systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] },
+                tools: [{ functionDeclarations: [ROUTER_TOOL] }] 
+            }
           });
           setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 2 } : msg));
           
@@ -916,7 +960,7 @@ const useAgentChat = (
         } finally {
           setIsLoading(false);
         }
-    }, [isLoading, isPyodideReady, ai, persona, messages]);
+    }, [isLoading, isPyodideReady, ai, persona, messages, processStream]);
 
     return { messages, setMessages, isLoading, error, handleSendMessage, handleExecuteCode, continuePwcLoop };
 };
@@ -987,7 +1031,7 @@ const App: React.FC = () => {
         return msg;
     }));
     
-    const userMessage = messages.find(m => m.role === 'user');
+    const userMessage = messages.slice().reverse().find(m => m.role === 'user');
 
     setDebugSession({
       code: functionCall.args.code,

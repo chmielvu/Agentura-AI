@@ -35,7 +35,7 @@ export interface PlanStep {
   tool_to_use: string;
   acceptance_criteria: string;
   // New fields for execution tracking
-  status?: 'pending' | 'in-progress' | 'completed' | 'failed';
+  status: 'pending' | 'in-progress' | 'completed' | 'failed';
   result?: string;
 }
 
@@ -62,6 +62,17 @@ export interface CritiqueResult {
   critique: string;
 }
 
+export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface WorkflowStepState {
+  status: WorkflowStepStatus;
+  details?: any; // Can hold logs, errors, or results
+  startTime?: number;
+  endTime?: number;
+}
+
+export type WorkflowState = Record<string, WorkflowStepState>; // Key is node ID
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
@@ -78,11 +89,18 @@ export interface ChatMessage {
   };
   critique?: CritiqueResult;
   taskType?: TaskType; // Used for visualization of the loading message
-  currentStep?: number; // For WoT visualization
+  workflowState?: WorkflowState;
 }
 
 export interface FileData {
   name: string;
   type: string;
   content: string; // base64 encoded
+}
+
+export interface SessionState {
+  version: string;
+  messages: ChatMessage[];
+  // agenticState might be used in the future for more complex resumability
+  agenticState: {};
 }

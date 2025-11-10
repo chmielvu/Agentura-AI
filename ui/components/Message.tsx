@@ -1,7 +1,7 @@
 import React from 'react';
-import { ChatMessage, FunctionCall, Plan, CritiqueResult, GroundingSource } from '../../types';
+import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource } from '../../types';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
-import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon } from '../../components/Icons';
+import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, StopIcon } from '../../components/Icons';
 
 export const Message: React.FC<{ 
     message: ChatMessage;
@@ -11,7 +11,15 @@ export const Message: React.FC<{
 }> = ({ message, onExecuteCode, onDebugCode, onExecutePlan }) => {
   const isUser = message.role === 'user';
 
-  const renderContent = (content: string) => content.split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>);
+  const renderContent = (content: string) => {
+    const parts = content.split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>);
+    return (
+        <>
+            {parts}
+            {message.isLoading && <span className="animate-pulse">|</span>}
+        </>
+    );
+  };
 
   const renderSources = (sources: GroundingSource[]) => (
     <div className="mt-3 pt-3 border-t border-border/50">
@@ -36,20 +44,40 @@ export const Message: React.FC<{
     </div>
   );
   
+  const renderPlanStepStatus = (status: PlanStep['status']) => {
+    switch (status) {
+        case 'pending':
+            return <span className="text-xs font-mono text-foreground/60">[PENDING]</span>;
+        case 'in-progress':
+            return <span className="text-xs font-mono text-accent animate-pulse">[RUNNING...]</span>;
+        case 'completed':
+            return <span className="text-xs font-mono text-green-500">[DONE]</span>;
+        case 'failed':
+            return <span className="text-xs font-mono text-red-500">[FAILED]</span>;
+        default:
+            return null;
+    }
+  }
+
   const renderPlan = (plan: Plan) => (
     <div className="mt-2 space-y-3">
         <div className="flex justify-between items-center">
             <h4 className="text-sm font-semibold text-foreground/80">Generated Plan:</h4>
-            <button 
-                onClick={() => onExecutePlan(plan)}
-                className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm transition-colors"
-            >
-                Run This Plan
-            </button>
+            {!plan.plan.some(p => p.status === 'in-progress' || p.status === 'completed') && (
+                <button 
+                    onClick={() => onExecutePlan(plan)}
+                    className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm transition-colors flex items-center gap-1.5"
+                >
+                    <PlayIcon className="w-3 h-3"/> Run This Plan
+                </button>
+            )}
         </div>
         {plan.plan.map((step) => (
             <div key={step.step_id} className="p-3 bg-card/50 rounded-sm border border-border">
-                <p className="font-semibold text-foreground">Step {step.step_id}: {step.description}</p>
+                <div className="flex justify-between items-start">
+                    <p className="font-semibold text-foreground flex-1">Step {step.step_id}: {step.description}</p>
+                    {renderPlanStepStatus(step.status)}
+                </div>
                 <div className="mt-2 text-xs space-y-1 text-foreground/70">
                     <p>Tool: <span className="font-medium text-foreground/80">{step.tool_to_use}</span></p>
                 </div>
@@ -106,7 +134,7 @@ export const Message: React.FC<{
               : message.role === 'tool' ? <pre>Tool Output: {JSON.stringify(message.functionResponse?.response, null, 2)}</pre>
               : renderContent(message.content)}
           </div>
-          {message.isLoading && message.taskType && <AgentGraphVisualizer taskType={message.taskType} activeStep={message.currentStep ?? 0} />}
+          {message.isLoading && message.taskType && message.workflowState && <AgentGraphVisualizer taskType={message.taskType} workflowState={message.workflowState} />}
           {message.sources && message.sources.length > 0 && renderSources(message.sources)}
         </div>
       </div>

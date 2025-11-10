@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Persona, ChatMessage, Plan } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Persona } from './types';
 import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
@@ -13,14 +13,7 @@ const App: React.FC = () => {
   const [isPyodideReady, setIsPyodideReady] = useState(false);
   const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
 
-  const initialMessages = useMemo(() => {
-    try {
-      const saved = localStorage.getItem('agentic-chat-messages');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  }, []);
-
-  const { messages, setMessages, isLoading, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(initialMessages, persona, pyodideRef);
+  const { messages, setMessages, isLoading, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, pyodideRef);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
@@ -71,7 +64,7 @@ const App: React.FC = () => {
       <Header persona={persona} onPersonaChange={handlePersonaChange} />
       <HUD isLoading={isLoading} isPyodideReady={isPyodideReady} messages={messages} />
       
-      <main className="flex-1 overflow-y-auto pt-40 pb-4">
+      <main className="flex-1 overflow-y-auto pt-40 pb-4" aria-live="polite">
         <div className="max-w-4xl mx-auto px-4">
           {messages.length === 0 && !isLoading ? (
             <div className="text-center text-foreground/70 mt-8">

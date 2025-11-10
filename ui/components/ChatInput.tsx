@@ -76,7 +76,7 @@ export const ChatInput: React.FC<{
         )}
 
         <div className="flex items-center bg-background rounded-sm p-2 border border-border focus-within:ring-1 focus-within:ring-accent">
-            <button onClick={() => fileInputRef.current?.click()} className="p-2 text-foreground/70 hover:text-white"><PaperclipIcon /></button>
+            <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-foreground/70 hover:text-white"><PaperclipIcon /></button>
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
             <textarea
                 value={prompt}
@@ -87,7 +87,7 @@ export const ChatInput: React.FC<{
                 rows={1}
                 disabled={isLoading || !isPyodideReady}
             />
-            <button onClick={handleSubmit} disabled={isLoading || (!prompt.trim() && !file)} className="p-2 rounded-sm transition-colors disabled:opacity-50 enabled:bg-accent enabled:hover:bg-accent/80 text-white">
+            <button onClick={handleSubmit} aria-label="Send message" disabled={isLoading || (!prompt.trim() && !file)} className="p-2 rounded-sm transition-colors disabled:opacity-50 enabled:bg-accent enabled:hover:bg-accent/80 text-white">
                 <SendIcon />
             </button>
         </div>

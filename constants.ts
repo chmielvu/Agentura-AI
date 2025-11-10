@@ -2,6 +2,7 @@ import { FunctionDeclaration, Type } from '@google/genai';
 import { TaskType, Persona } from './types';
 
 export const APP_TITLE = "Agentura AI";
+export const APP_VERSION = "2.5.0";
 
 // 1. ROUTER_SYSTEM_INSTRUCTION (Full Implementation)
 // This is the Metaprompt "Constitution" for the Router Agent.

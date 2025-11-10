@@ -1,6 +1,6 @@
 import { TaskType } from '../../types';
 
-const svgToDataURI = (svgString: string, color: string = '#E0E0E0'): string => {
+export const svgToDataURI = (svgString: string, color: string = '#E0E0E0'): string => {
     const coloredSvg = svgString.replace(/currentColor/g, color);
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(coloredSvg)}`;
 };
@@ -19,49 +19,96 @@ export const iconSvgs = {
     OptimizeIcon: `<svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h18M7.5 4.5v5.25l-4.5 4.5v3h15v-3l-4.5-4.5V4.5" /></svg>`,
 };
 
-const defaultColor = '#757575';
-export const agentGraphConfigs: Record<string, { nodes: any[], edges: any[] }> = {
+export type GraphNode = { id: number; label: string; icon: keyof typeof iconSvgs };
+type GraphEdge = { from: number; to: number; id: string };
+
+export const agentGraphConfigs: Record<string, { nodes: GraphNode[], edges: GraphEdge[] }> = {
     [TaskType.Chat]: {
-        nodes: [{ id: 1, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, defaultColor) }, { id: 2, label: 'Chat', image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor) }],
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' }, 
+            { id: 2, label: 'Chat', icon: 'BrainCircuitIcon' }
+        ],
         edges: [{ from: 1, to: 2, id: '1_2' }],
     },
     [TaskType.Code]: {
         nodes: [
-            { id: 1, label: 'Router', image: svgToDataURI(iconSvgs.RouterIcon, defaultColor) },
-            { id: 2, label: 'Code Gen', image: svgToDataURI(iconSvgs.CodeBracketIcon, defaultColor) },
-            { id: 3, label: 'Execute', image: svgToDataURI(iconSvgs.PerceptionIcon, defaultColor) },
-            { id: 4, label: 'Critique', image: svgToDataURI(iconSvgs.CritiqueIcon, defaultColor) },
-            { id: 5, label: 'Synthesize', image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor) },
+            { id: 1, label: 'Router', icon: 'RouterIcon' },
+            { id: 2, label: 'Code Gen', icon: 'CodeBracketIcon' },
+            { id: 3, label: 'Execute', icon: 'PerceptionIcon' },
+            { id: 4, label: 'Critique', icon: 'CritiqueIcon' },
+            { id: 5, label: 'Synthesize', icon: 'BrainCircuitIcon' },
         ],
-        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }, { from: 4, to: 5, id: '4_5' }],
+        edges: [
+            { from: 1, to: 2, id: '1_2' }, 
+            { from: 2, to: 3, id: '2_3' }, 
+            { from: 3, to: 4, id: '3_4' }, 
+            { from: 4, to: 5, id: '4_5' }
+        ],
     },
-    // ... other task types would be defined similarly
     [TaskType.Research]: {
-        nodes: [{id:1, label:'Router'}, {id:2, label:'Search'}, {id:3, label:'Critique'}, {id:4, label:'Synthesize'}].map(n => ({...n, image: svgToDataURI(iconSvgs.SearchIcon, defaultColor)})),
-        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }],
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' }, 
+            { id: 2, label: 'Search', icon: 'SearchIcon' },
+            { id: 3, label: 'Critique', icon: 'CritiqueIcon' },
+            { id: 4, label: 'Synthesize', icon: 'BrainCircuitIcon' }
+        ],
+        edges: [
+            { from: 1, to: 2, id: '1_2' },
+            { from: 2, to: 3, id: '2_3' }, 
+            { from: 3, to: 4, id: '3_4' }
+        ],
     },
     [TaskType.Complex]: {
-        nodes: [{id:1, label:'Router'}, {id:2, label:'Generate v1'}, {id:3, label:'Critique'}, {id:4, label:'Synthesize v2'}].map(n => ({...n, image: svgToDataURI(iconSvgs.BrainCircuitIcon, defaultColor)})),
-        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }, { from: 3, to: 4, id: '3_4' }],
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' }, 
+            { id: 2, label: 'Generate v1', icon: 'GenerateIcon' }, 
+            { id: 3, label: 'Critique', icon: 'CritiqueIcon' }, 
+            { id: 4, label: 'Synthesize v2', icon: 'BrainCircuitIcon' }
+        ],
+        edges: [
+            { from: 1, to: 2, id: '1_2' }, 
+            { from: 2, to: 3, id: '2_3' }, 
+            { from: 3, to: 4, id: '3_4' }
+        ],
     },
     [TaskType.Planner]: {
-        nodes: [{id:1, label:'Router'}, {id:2, label:'Plan'}].map(n => ({...n, image: svgToDataURI(iconSvgs.PlanIcon, defaultColor)})),
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' }, 
+            { id: 2, label: 'Plan', icon: 'PlanIcon' }
+        ],
         edges: [{ from: 1, to: 2, id: '1_2' }],
     },
     [TaskType.Vision]: {
-        nodes: [{id:1, label:'Router'}, {id:2, label:'Analyze'}].map(n => ({...n, image: svgToDataURI(iconSvgs.PerceptionIcon, defaultColor)})),
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' }, 
+            { id: 2, label: 'Analyze', icon: 'PerceptionIcon' }
+        ],
         edges: [{ from: 1, to: 2, id: '1_2' }],
     },
     [TaskType.Creative]: {
-        nodes: [{id:1, label:'Router'}, {id:2, label:'Create'}, {id:3, label:'Tool Call'}].map(n => ({...n, image: svgToDataURI(iconSvgs.SparklesIcon, defaultColor)})),
-        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }],
+        nodes: [
+            { id: 1, label: 'Router', icon: 'RouterIcon' },
+            { id: 2, label: 'Create', icon: 'SparklesIcon' }, 
+            { id: 3, label: 'Tool Call', icon: 'GenerateIcon' }
+        ],
+        edges: [
+            { from: 1, to: 2, id: '1_2' }, 
+            { from: 2, to: 3, id: '2_3' }
+        ],
     },
     [TaskType.Critique]: {
-        nodes: [{id:1, label:'Analyze'}].map(n => ({...n, image: svgToDataURI(iconSvgs.CritiqueIcon, defaultColor)})),
+        nodes: [{ id: 1, label: 'Analyze', icon: 'CritiqueIcon' }],
         edges: [],
     },
     [TaskType.Retry]: {
-        nodes: [{id:1, label:'Critique'}, {id:2, label:'APO Refine'}, {id:3, label:'Re-run'}].map(n => ({...n, image: svgToDataURI(iconSvgs.OptimizeIcon, defaultColor)})),
-        edges: [{ from: 1, to: 2, id: '1_2' }, { from: 2, to: 3, id: '2_3' }],
+        nodes: [
+            { id: 1, label: 'Critique', icon: 'CritiqueIcon' }, 
+            { id: 2, label: 'APO Refine', icon: 'OptimizeIcon' }, 
+            { id: 3, label: 'Re-run', icon: 'BrainCircuitIcon' }
+        ],
+        edges: [
+            { from: 1, to: 2, id: '1_2' }, 
+            { from: 2, to: 3, id: '2_3' }
+        ],
     }
 };

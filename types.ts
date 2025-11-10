@@ -43,8 +43,10 @@ export interface Plan {
 }
 
 export interface FunctionCall {
+    id: string;
     name: string;
     args: Record<string, any>;
+    isAwaitingExecution?: boolean;
 }
 
 export interface CritiqueScores {

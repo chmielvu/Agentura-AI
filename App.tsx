@@ -4,6 +4,8 @@ import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, Co
 import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall, CritiqueResult } from './types';
 import { APP_TITLE, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_TOOL } from './constants';
 import { SendIcon, PaperclipIcon, BrainCircuitIcon, XCircleIcon, UserIcon, SearchIcon, GitHubIcon, RouterIcon, OptimizeIcon, CritiqueIcon, PerceptionIcon, PlanIcon, GenerateIcon, ImageIcon, CodeBracketIcon, SparklesIcon } from './components/Icons';
+import DebuggerModal from './components/Debugger';
+
 
 declare const vis: any;
 declare global {
@@ -264,7 +266,11 @@ const Header: React.FC<{
   </header>
 );
 
-const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
+const Message: React.FC<{ 
+    message: ChatMessage;
+    onExecuteCode: (messageId: string, functionCallId: string) => void;
+    onDebugCode: (messageId: string, functionCallId: string) => void;
+}> = ({ message, onExecuteCode, onDebugCode }) => {
   const isUser = message.role === 'user';
 
   const renderContent = (content: string) => {
@@ -287,6 +293,22 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
                         <pre className="p-4 text-sm text-foreground overflow-x-auto">
                             <code className="font-mono">{call.args.code}</code>
                         </pre>
+                        {call.isAwaitingExecution && (
+                            <div className="px-4 py-2 border-t border-border flex items-center gap-2">
+                                <button
+                                    onClick={() => onExecuteCode(message.id, call.id)}
+                                    className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm transition-colors"
+                                >
+                                    Execute
+                                </button>
+                                <button
+                                    onClick={() => onDebugCode(message.id, call.id)}
+                                    className="text-xs bg-card hover:bg-border text-foreground px-3 py-1 rounded-sm transition-colors border border-border"
+                                >
+                                    Debug
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )
             }
@@ -611,6 +633,9 @@ const useAgentChat = (
     const [error, setError] = useState<string | null>(null);
     const chatRef = useRef<(Chat & { _persona?: Persona, _taskType?: TaskType }) | null>(null);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
+    
+    // Store pending PWC loop continuations
+    const pwcContinuationRef = useRef<Record<string, (output: string) => void>>({});
   
     useEffect(() => {
       try {
@@ -623,6 +648,7 @@ const useAgentChat = (
     const runPythonCode = async (code: string): Promise<string> => {
         if (!pyodideRef.current) return "Error: Pyodide is not initialized.";
         try {
+          // Redirect stdout
           pyodideRef.current.runPython(`
             import sys, io
             sys.stdout = io.StringIO()
@@ -647,7 +673,7 @@ const useAgentChat = (
           }
     
           if (chunk.functionCalls) {
-            functionCalls = chunk.functionCalls.map(fc => ({ name: fc.name, args: fc.args }));
+            functionCalls = chunk.functionCalls.map(fc => ({ id: `fc-${Date.now()}-${Math.random()}`, name: fc.name, args: fc.args }));
           }
           
           const metadata = chunk.candidates?.[0]?.groundingMetadata as GroundingMetadata | undefined;
@@ -674,6 +700,88 @@ const useAgentChat = (
         return { fullText, sources, parsedPlan, functionCalls };
     };
 
+    const continuePwcLoop = useCallback(async (
+        codeOutput: string,
+        assistantMessageId: string,
+        userPrompt: string
+    ) => {
+        setIsLoading(true);
+        // Worker Phase Output
+        const toolMessage: ChatMessage = {
+            id: (Date.now() + 2).toString(),
+            role: 'tool',
+            content: '',
+            functionResponse: { name: 'code_interpreter', response: { content: codeOutput } }
+        };
+        setMessages(prev => [...prev, toolMessage]);
+        setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 5 } : msg));
+
+        // Critic Phase
+        const critiqueMessageId = (Date.now() + 3).toString();
+        setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique, currentStep: 1 }]);
+        setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 6 } : msg));
+        
+        const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
+        const outputForCritique = `Original Query: ${userPrompt}\nTool Output: ${codeOutput}`;
+
+        const critiqueResponse = await ai.models.generateContent({
+            model: critiqueConfig.model,
+            contents: { parts: [{ text: outputForCritique }] },
+            config: critiqueConfig.config as any,
+        });
+
+        let critiqueResult: CritiqueResult | null = null;
+        try {
+          critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
+        } catch(e) {
+          console.error("Failed to parse critique response", e);
+          setError("The critic agent provided a malformed response.");
+        }
+        
+        setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
+        
+        // Synthesis / Reflexion Phase
+        const finalAnswerId = (Date.now() + 4).toString();
+        setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Code, currentStep: 1 }]);
+        setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 7, isLoading: false } : msg));
+        
+        const toolParts: Part[] = [
+            { functionResponse: { name: 'code_interpreter', response: { content: codeOutput } } },
+        ];
+        if (critiqueResult) {
+            toolParts.push({ functionResponse: { name: 'critique_feedback', response: critiqueResult } });
+        }
+        
+        const stream2 = await chatRef.current!.sendMessageStream({ message: toolParts });
+        await processStream(stream2, finalAnswerId, TaskType.Code);
+        setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
+
+        setIsLoading(false);
+    }, [ai]);
+
+    const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string) => {
+        setIsLoading(true);
+        const message = messages.find(m => m.id === messageId);
+        const functionCall = message?.functionCalls?.find(fc => fc.id === functionCallId);
+
+        if (!message || !functionCall || functionCall.name !== 'code_interpreter') return;
+
+        // Mark as executing
+        setMessages(prev => prev.map(msg => {
+            if (msg.id === messageId) {
+                return { ...msg, functionCalls: msg.functionCalls?.map(fc => fc.id === functionCallId ? { ...fc, isAwaitingExecution: false } : fc) };
+            }
+            return msg;
+        }));
+        
+        const code = functionCall.args.code;
+        const output = await runPythonCode(code);
+        
+        const userMessage = messages.find(m => m.role === 'user'); // simplistic way to find original prompt
+        await continuePwcLoop(output, messageId, userMessage?.content || '');
+
+    }, [messages, runPythonCode, continuePwcLoop]);
+
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string) => {
         if (isLoading || !isPyodideReady) return;
         setIsLoading(true);
@@ -694,6 +802,7 @@ const useAgentChat = (
 
         try {
           // 1. Router Agent Call
+          setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, currentStep: 1 }]);
           const routerResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: { parts: [{ text: `Classify the user's intent for the following query: "${prompt}"` }] },
@@ -710,7 +819,7 @@ const useAgentChat = (
           }
           if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
           
-          setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '', isLoading: true, taskType: routedTask, currentStep: 1 }]);
+          setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, taskType: routedTask } : msg));
     
           // 2. Prepare for Specialist Agent
           const parts: Part[] = [{ text: prompt }];
@@ -749,69 +858,53 @@ const useAgentChat = (
           
           // 3. First Turn (User -> Model)
           const stream1 = await chatRef.current.sendMessageStream({ message: parts });
-          const { functionCalls } = await processStream(stream1, assistantMessageId, routedTask);
+          const { fullText, functionCalls } = await processStream(stream1, assistantMessageId, routedTask);
     
-          // 4. Handle Tool Call (PWC Loop for Code Agent)
-          if (functionCalls && functionCalls.length > 0 && functionCalls[0].name === 'code_interpreter') {
-            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 4 } : msg));
-            const code = functionCalls[0].args.code;
-    
-            // Worker Phase
-            const output = await runPythonCode(code);
-            const toolMessage: ChatMessage = {
-                id: (Date.now() + 2).toString(),
-                role: 'tool',
-                content: '',
-                functionResponse: { name: 'code_interpreter', response: { content: output } }
-            };
-            setMessages(prev => [...prev, toolMessage]);
-            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 5 } : msg));
+          // 4. Handle Tool Call (Pause for Code Agent) or Critique Flow
+          if (routedTask === TaskType.Complex) {
+              // Mark initial complex response as complete
+              setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
+              
+              // Critic Phase
+              const critiqueMessageId = (Date.now() + 2).toString();
+              setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique, currentStep: 1 }]);
+              
+              const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
+              const outputForCritique = `Original Query: ${prompt}\nAgent Output: ${fullText}`;
 
-            // Critic Phase
-            const critiqueMessageId = (Date.now() + 3).toString();
-            setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique, currentStep: 1 }]);
-            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 6 } : msg));
-            
-            const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
-            const outputForCritique = `Original Query: ${prompt}\nTool Output: ${output}`;
-    
-            const critiqueResponse = await ai.models.generateContent({
-                model: critiqueConfig.model,
-                contents: { parts: [{ text: outputForCritique }] },
-                config: critiqueConfig.config as any,
-            });
-    
-            let critiqueResult: CritiqueResult | null = null;
-            try {
-              critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
-            } catch(e) {
-              console.error("Failed to parse critique response", e);
-              setError("The critic agent provided a malformed response.");
-            }
-            
-            setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
-            
-            // Synthesis / Reflexion Phase
-            const { faithfulness, coherence, coverage } = critiqueResult?.scores || {};
-            if (critiqueResult && (faithfulness < 4 || coherence < 4 || coverage < 4)) {
-                // Future: Implement retry logic here
-            }
+              const critiqueResponse = await ai.models.generateContent({
+                  model: critiqueConfig.model,
+                  contents: { parts: [{ text: outputForCritique }] },
+                  config: critiqueConfig.config as any,
+              });
 
-            const finalAnswerId = (Date.now() + 4).toString();
-            setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask, currentStep: 1 }]);
-            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 7, isLoading: false } : msg));
-            
-            const toolParts: Part[] = [
-                { functionResponse: { name: 'code_interpreter', response: { content: output } } },
-            ];
-            if (critiqueResult) {
-                toolParts.push({ functionResponse: { name: 'critique_feedback', response: critiqueResult } });
-            }
-            
-            const stream2 = await chatRef.current!.sendMessageStream({ message: toolParts });
-            await processStream(stream2, finalAnswerId, routedTask);
-            setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
+              let critiqueResult: CritiqueResult | null = null;
+              try {
+                critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
+              } catch(e) {
+                console.error("Failed to parse critique response", e);
+                setError("The critic agent provided a malformed response.");
+              }
+              
+              setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
+              
+              // Synthesis Phase
+              const finalAnswerId = (Date.now() + 3).toString();
+              setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask, currentStep: 1 }]);
+              
+              const synthesisPrompt = `An independent critique of your previous answer was performed. Here is the result:\n\n${JSON.stringify(critiqueResult, null, 2)}\n\nBased on this critique, please provide a final, revised, and improved answer to the original user query. Address the user directly and do not mention the critique process in your final output.`;
+              
+              const stream2 = await chatRef.current!.sendMessageStream({ message: [{text: synthesisPrompt}] });
+              await processStream(stream2, finalAnswerId, routedTask);
+              setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
 
+          } else if (functionCalls && functionCalls.length > 0 && functionCalls[0].name === 'code_interpreter') {
+            setMessages(prev => prev.map(msg => {
+                if (msg.id === assistantMessageId) {
+                    return { ...msg, currentStep: 4, isLoading: false, functionCalls: msg.functionCalls?.map(fc => ({...fc, isAwaitingExecution: true})) };
+                }
+                return msg;
+            }));
           } else {
             setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
           }
@@ -825,7 +918,7 @@ const useAgentChat = (
         }
     }, [isLoading, isPyodideReady, ai, persona, messages]);
 
-    return { messages, setMessages, isLoading, error, handleSendMessage };
+    return { messages, setMessages, isLoading, error, handleSendMessage, handleExecuteCode, continuePwcLoop };
 };
 
 // --- Main App Component ---
@@ -836,6 +929,7 @@ const App: React.FC = () => {
   });
   const pyodideRef = useRef<any>(null);
   const [isPyodideReady, setIsPyodideReady] = useState(false);
+  const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
 
   const initialMessages = useMemo(() => {
     try {
@@ -847,7 +941,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const { messages, setMessages, isLoading, error, handleSendMessage } = useAgentChat(initialMessages, persona, pyodideRef, isPyodideReady);
+  const { messages, setMessages, isLoading, error, handleSendMessage, handleExecuteCode, continuePwcLoop } = useAgentChat(initialMessages, persona, pyodideRef, isPyodideReady);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
@@ -880,8 +974,40 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDebugCode = (messageId: string, functionCallId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    const functionCall = message?.functionCalls?.find(fc => fc.id === functionCallId);
+
+    if (!message || !functionCall || !pyodideRef.current) return;
+    
+    setMessages(prev => prev.map(msg => {
+        if (msg.id === messageId) {
+            return { ...msg, functionCalls: msg.functionCalls?.map(fc => fc.id === functionCallId ? { ...fc, isAwaitingExecution: false } : fc) };
+        }
+        return msg;
+    }));
+    
+    const userMessage = messages.find(m => m.role === 'user');
+
+    setDebugSession({
+      code: functionCall.args.code,
+      onComplete: (output: string) => {
+        continuePwcLoop(output, messageId, userMessage?.content || '');
+        setDebugSession(null);
+      },
+    });
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-foreground font-mono">
+      {debugSession && (
+        <DebuggerModal
+          code={debugSession.code}
+          onComplete={debugSession.onComplete}
+          pyodide={pyodideRef.current}
+          onClose={() => setDebugSession(null)}
+        />
+      )}
       <Header persona={persona} onPersonaChange={handlePersonaChange} />
       <main className="flex-1 overflow-y-auto pt-32 pb-4">
         <div className="max-w-4xl mx-auto px-4">
@@ -892,7 +1018,14 @@ const App: React.FC = () => {
             </div>
           ) : (
             <>
-              {messages.map((msg) => <Message key={msg.id} message={msg} />)}
+              {messages.map((msg) => (
+                <Message
+                    key={msg.id}
+                    message={msg}
+                    onExecuteCode={handleExecuteCode}
+                    onDebugCode={handleDebugCode}
+                />
+              ))}
               <div ref={messagesEndRef} />
             </>
           )}

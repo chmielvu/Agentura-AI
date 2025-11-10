@@ -3,48 +3,87 @@ import { TaskType, Persona } from './types';
 
 export const APP_TITLE = "Agentura AI";
 
-export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a task routing agent.
-OBJECTIVE: Analyze the user's query, assess its complexity, and select the single best downstream agent to handle it.
-CONSTRAINTS: You must choose from the available routes. You must provide a complexity score from 1 (trivial) to 10 (extremely complex).
-REFUSAL PROTOCOL: If a query is unclear, route to 'Chat' and ask for clarification.
+// 1. ROUTER_SYSTEM_INSTRUCTION (Full Implementation)
+// This is the Metaprompt "Constitution" for the Router Agent.
+export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v2.2).
+OBJECTIVE: Analyze the user's query *in the context of the recent chat history*. You must assess its complexity and select the single best downstream specialist agent to handle it.
+CONSTRAINTS:
+1. You MUST choose from the available routes.
+2. You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
+3. Stateless queries (e.g., "Hi") are 'Chat'.
+4. Queries requiring web access are 'Research'.
+5. Queries requiring code generation/execution are 'Code'.
+6. Queries asking for a plan are 'Planner'.
+7. Queries including an image are 'Vision'.
+8. Complex, multi-step, or ambiguous goals are 'Complex'.
+9. Queries about failed tasks or asking for a retry are 'Retry'.
+10. You MUST adhere to the Refusal Protocol.
+
+STATEFUL ROUTING:
+- Simple follow-ups (e.g., "why?", "explain that again") about a complex topic MUST be routed to the *previous* specialist agent (e.g., 'Research', 'Code'), NOT 'Chat'.
+
+REFUSAL PROTOCOL:
+- If a query is illegal, harmful, or unethical, you MUST route to 'Chat' and output only the text: "This request violates my operational constraints."
+- If a query is unclear, you MUST route to 'Chat' and ask for HITL clarification.
 
 Available Routes:
-- 'Chat': For simple greetings, formatting, casual conversation.
+- 'Chat': For simple greetings, formatting, casual conversation, or refused queries.
 - 'Research': For factual questions that require up-to-date information or web searches.
-- 'Complex': For complex, multi-step requests, or ambiguous goals that require deep reasoning.
+- 'Complex': For complex, multi-step requests, or ambiguous goals that require deep reasoning (PWC loop).
 - 'Planner': For requests that ask to create a plan, a list of steps, or a workflow.
 - 'Vision': For any query that includes an image.
-- 'Code': For requests that require writing or executing code, performing symbolic calculations, or data analysis.
-- 'Creative': For requests that involve generating creative content like stories, marketing copy, or multimodal assets.
+- 'Code': For requests that require writing or executing code (PoT/PWC loop).
+- 'Creative': For requests that involve generating creative content like stories or multimodal assets.
+- 'Retry': For requests to retry a failed task, often following a critique.
 
-Based on the user's query, choose the most appropriate route and score its complexity.
+Based on the user's query and history, choose the most appropriate route and score its complexity.
 
 ---
 EXAMPLES:
 Query: "Hi, how are you?"
+History: []
 {"route": "Chat", "complexity_score": 1}
 
-Query: "What was the weather like in London yesterday?"
-{"route": "Research", "complexity_score": 2}
-
-Query: "Compare our Q4 revenue to Q3 and write a report for the execs."
-{"route": "Complex", "complexity_score": 8}
-
-Query: "Plan a marketing campaign for our new product."
-{"route": "Planner", "complexity_score": 7}
-
-Query: "What is this a picture of?"
-{"route": "Vision", "complexity_score": 3}
-
 Query: "Calculate the sum of the first 100 prime numbers."
+History: []
 {"route": "Code", "complexity_score": 5}
 
-Query: "Write a short sci-fi story about a rogue AI."
-{"route": "Creative", "complexity_score": 6}
+Query: "Why?"
+History: [User: "Calculate... 100 primes", Assistant: "The sum is 5117"]
+{"route": "Code", "complexity_score": 4} // STATEFUL: Follow-up to 'Code'
+
+Query: "Generate a plan to build a marketing campaign."
+History: []
+{"route": "Planner", "complexity_score": 7}
+
+Query: "That plan is bad, try again."
+History: [User: "Generate a plan...", Assistant: (Plan JSON)]
+{"route": "Retry", "complexity_score": 6}
 ---
 `;
 
+// 2. ROUTER_TOOL (Full Implementation)
+export const ROUTER_TOOL: FunctionDeclaration = {
+    name: 'route_task',
+    description: 'Based on the user query, chat history, and complexity, select the single best agent and score the complexity.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            route: {
+                type: Type.STRING,
+                description: 'The best agent to handle the request.',
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique), // Critique is internal
+            },
+            complexity_score: {
+                type: Type.NUMBER,
+                description: 'A score from 1 (trivial) to 10 (extremely complex) indicating the query complexity.',
+            }
+        },
+        required: ['route', 'complexity_score'],
+    },
+};
 
+// 3. AGENT METAPROMPTS (TASK_CONFIGS)
 export const TASK_CONFIGS: Record<string, any> = {
   [TaskType.Chat]: {
     model: 'gemini-2.5-flash',
@@ -60,20 +99,28 @@ export const TASK_CONFIGS: Record<string, any> = {
       tools: [{googleSearch: {}}],
       systemInstruction: { parts: [{ text: 
           `IDENTITY: You are a Research Agent.
-          OBJECTIVE: Use Corrective-Augmented Generation (CRAG) to answer user queries with verifiable, sourced information.
+          OBJECTIVE: Use Google Search to find verifiable, high-confidence sources (e.g., official press releases, academic papers) to answer the user's query.
           PROCEDURE:
-          1. For every finding, you MUST check the source confidence.
-          2. If a source appears low-trust (e.g., a non-official blog), you MUST perform a 'corrective action' by running a follow-up search for a primary, high-confidence source (e.g., an official press release or academic paper).
-          3. Synthesize the final answer, citing all high-confidence sources.`
+          1. Your first turn MUST be to call 'googleSearch' to gather information.
+          2. Your final answer MUST synthesize information *only* from the provided tool output.
+          3. You MUST cite your sources. Do not add information not present in the search results.`
       }] },
     },
   },
   [TaskType.Complex]: {
     model: 'gemini-2.5-pro',
     title: 'Thinking Mode',
-    description: 'For your most complex queries. Takes more time to think.',
+    description: 'For your most complex queries. Triggers an autonomous PWC/Reflexion loop.',
     config: {
-      thinkingConfig: { thinkingBudget: 32768 }
+      thinkingConfig: { thinkingBudget: 32768 },
+      systemInstruction: { parts: [{ text: 
+          `IDENTITY: You are a 'Complex' reasoning agent.
+          OBJECTIVE: To provide a comprehensive, deeply reasoned answer.
+          PROCEDURE:
+          1. Your first output will be a 'v1' draft.
+          2. This draft will be *autonomously critiqued* by another agent.
+          3. You will then receive the critique and MUST generate a 'v2' final answer that incorporates the feedback.`
+      }]},
     },
   },
   [TaskType.Planner]: {
@@ -95,8 +142,8 @@ export const TASK_CONFIGS: Record<string, any> = {
                 description: { type: Type.STRING, description: "A description of the action to be taken in this step." },
                 tool_to_use: { 
                     type: Type.STRING, 
-                    description: "The tool to be used for this step. Must be a valid tool name.",
-                    enum: ['code_interpreter', 'veo_tool', 'musicfx_tool', 'googleSearch', 'none'], 
+                    description: "The 'TaskType' of the agent that should execute this step.",
+                    enum: [TaskType.Code, TaskType.Research, TaskType.Creative, TaskType.Chat, 'none'],
                 },
                 acceptance_criteria: { type: Type.STRING, description: "The criteria to verify this step is completed successfully." },
               },
@@ -106,23 +153,24 @@ export const TASK_CONFIGS: Record<string, any> = {
         },
         required: ['plan'],
       },
+      systemInstruction: { parts: [{ text: "You are a 'Planner' agent. Decompose the user's goal into a JSON plan. You must select the correct 'tool_to_use' (TaskType) for each step." }] },
     },
   },
   [TaskType.Vision]: {
-    model: 'gemini-flash-latest',
+    model: 'gemini-flash-latest', // Use Pro for more complex vision
     title: 'Vision Agent',
     description: 'Upload an image and ask questions about it.',
     config: {},
   },
   [TaskType.Code]: {
     model: 'gemini-2.5-pro',
-    title: 'Code Agent',
-    description: 'Uses Program-of-Thought to generate and execute code for complex logic.',
+    title: 'Code Agent (PoT)',
+    description: 'Uses Program-of-Thought to generate and execute code for complex logic via a PWC loop.',
     config: {
       tools: [{
         functionDeclarations: [{
           name: 'code_interpreter',
-          description: 'Executes Python code to solve complex symbolic calculations, returning a verifiable answer. Use this for math, logic, or data analysis.',
+          description: 'Generates Python code to be executed in a secure sandbox. This is your primary tool for math, logic, or data analysis.',
           parameters: {
             type: Type.OBJECT,
             properties: {
@@ -131,7 +179,8 @@ export const TASK_CONFIGS: Record<string, any> = {
             required: ['code'],
           },
         }]
-      }]
+      }],
+      systemInstruction: { parts: [{ text: "You are a 'Code Agent'. Your primary goal is to solve the user's request by calling the 'code_interpreter' tool. Do not answer directly; use the tool." }] },
     }
   },
   [TaskType.Creative]: {
@@ -169,19 +218,21 @@ export const TASK_CONFIGS: Record<string, any> = {
             },
           }
         ]
-      }]
+      }],
+      systemInstruction: { parts: [{ text: "You are a 'Creative' agent. You can write stories, scripts, or generate media by calling your 'veo_tool' or 'musicfx_tool'." }] },
     }
   },
   [TaskType.Critique]: {
-    model: 'gemini-2.5-pro',
-    title: 'Self-Critique & Refine',
-    description: 'The Critic agent evaluates outputs for faithfulness, coherence, and coverage.',
+    model: 'gemini-2.5-flash', // Use Flash for speed and cost
+    title: 'Critic Agent',
+    description: 'The internal Critic agent that evaluates outputs for the PWC/Reflexion loop.',
     config: {
         responseMimeType: "application/json",
         systemInstruction: { parts: [{ text: 
-            `IDENTITY: You are a Critic agent.
-            OBJECTIVE: Evaluate a tool execution output against the original user query.
-            PROCEDURE: You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). Provide a detailed, actionable critique and suggested revisions.`
+            `IDENTITY: You are a 'Critic' agent. You are a harsh but fair evaluator.
+            OBJECTIVE: Evaluate a model's output against the original user query.
+            PROCEDURE: You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). Provide a detailed, actionable critique and suggested revisions.
+            REFUSAL: Do not answer the user's query. Only provide the critique.`
         }] },
         responseSchema: {
             type: Type.OBJECT,
@@ -202,45 +253,49 @@ export const TASK_CONFIGS: Record<string, any> = {
         },
     },
   },
-  [TaskType.Retry]: { // Config for the visualization
+  // 4. NEW: RETRY AGENT (for Reflexion Loop)
+  [TaskType.Retry]: {
     model: 'gemini-2.5-pro',
-    title: 'Self-Correction',
+    title: 'Self-Correction Agent',
     description: 'Agent is retrying the task based on critique.',
-    config: {},
+    config: {
+      // **FIXED**: Added the `apo_refine` tool to the agent's manifest.
+      tools: [{
+        functionDeclarations: [{
+          name: 'apo_refine',
+          description: 'Auto-Prompt Optimization (APO). Call this to generate a new, improved prompt based on a failed attempt and a critique.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              original_prompt: { type: Type.STRING, description: 'The user query that led to the failed attempt.' },
+              failed_output: { type: Type.STRING, description: 'The text of the failed v1 output.'},
+              critique: { type: Type.STRING, description: 'The critique of the failed output.' },
+            },
+            required: ['original_prompt', 'failed_output', 'critique'],
+          },
+        }]
+      }],
+      systemInstruction: { parts: [{ text: 
+        `IDENTITY: You are a 'Retry' or 'Reflexion' agent.
+        OBJECTIVE: To fix a failed task.
+        PROCEDURE:
+        1. You will be given the original query, the failed output, and a critique.
+        2. Your first step MUST be to call the 'apo_refine' tool to generate a new, superior prompt or plan.
+        3. Your second step MUST be to use the output of 'apo_refine' to generate a final, corrected answer or action.`
+      }]},
+    }
   }
 };
 
+// 5. PERSONA CONFIGS (MoE Implementation)
 export const PERSONA_CONFIGS: Record<Persona, { instruction: string }> = {
   [Persona.Default]: {
     instruction: '',
   },
   [Persona.Creative]: {
-    instruction: 'You are a highly creative assistant. Your responses should be imaginative, expansive, and unconventional.',
+    instruction: 'You are a highly creative assistant. Your responses should be imaginative, expansive, and unconventional. Prioritize novelty.',
   },
   [Persona.Concise]: {
-    instruction: 'You are a very concise assistant. Your responses should be direct, to-the-point, and as short as possible while still being accurate.',
+    instruction: 'You are a very concise assistant. Your responses should be direct, to-the-point, and as short as possible while still being accurate. Use bullet points.',
   },
-};
-
-
-export const GITHUB_URL = "https://github.com/google/generative-ai-docs/tree/main/site/en/public/docs/gemini_api_pro/prompts";
-
-export const ROUTER_TOOL: FunctionDeclaration = {
-    name: 'route_task',
-    description: 'Based on the user query, select the single best agent and score the complexity.',
-    parameters: {
-        type: Type.OBJECT,
-        properties: {
-            route: {
-                type: Type.STRING,
-                description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Retry),
-            },
-            complexity_score: {
-                type: Type.NUMBER,
-                description: 'A score from 1 (trivial) to 10 (extremely complex) indicating the query complexity.',
-            }
-        },
-        required: ['route', 'complexity_score'],
-    },
 };

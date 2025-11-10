@@ -1,9 +1,6 @@
 
-
-
-
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, FunctionDeclaration, Content } from '@google/genai';
+import { GoogleGenAI, Chat, Part, GenerateContentResponse, GroundingMetadata, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, GroundingSource, RepoData, Persona, Plan, FunctionCall, CritiqueResult } from './types';
 import { APP_TITLE, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_TOOL } from './constants';
 import { SendIcon, PaperclipIcon, BrainCircuitIcon, XCircleIcon, UserIcon, SearchIcon, GitHubIcon, RouterIcon, OptimizeIcon, CritiqueIcon, PerceptionIcon, PlanIcon, GenerateIcon, ImageIcon, CodeBracketIcon, SparklesIcon } from './components/Icons';
@@ -142,11 +139,9 @@ const agentGraphConfigs: Record<string, { nodes: any[], edges: any[] }> = {
     },
 };
 
-const AgentGraphVisualizer: React.FC<{ taskType: TaskType }> = ({ taskType }) => {
+const AgentGraphVisualizer: React.FC<{ taskType: TaskType, activeStep: number }> = ({ taskType, activeStep }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<any>(null);
-    const [activeStep, setActiveStep] = useState(0);
-
     const graphData = agentGraphConfigs[taskType];
 
     useEffect(() => {
@@ -210,29 +205,14 @@ const AgentGraphVisualizer: React.FC<{ taskType: TaskType }> = ({ taskType }) =>
     }, [taskType, graphData]);
 
     useEffect(() => {
-        if (!graphData) return;
-        setActiveStep(0);
-        const timer = setInterval(() => {
-            setActiveStep(s => {
-                if (s >= graphData.nodes.length) {
-                    clearInterval(timer);
-                    return s;
-                }
-                return s + 1;
-            });
-        }, 800);
-        return () => clearInterval(timer);
-    }, [taskType, graphData]);
-
-    useEffect(() => {
-        if (!networkRef.current || !graphData) return;
+        if (!networkRef.current || !graphData || activeStep === 0) return;
         
         const nodesUpdate = graphData.nodes.map((node, index) => ({
             id: node.id,
             color: activeStep > index ? '#E53935' : '#333333',
         }));
         const edgesUpdate = graphData.edges.map((edge, index) => ({
-            id: `${edge.from}_${edge.to}`, // visjs needs edge ids for updates
+            id: `${edge.from}_${edge.to}`,
             color: activeStep > index + 1 ? '#E53935' : '#757575',
         }));
 
@@ -288,20 +268,6 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const isUser = message.role === 'user';
 
   const renderContent = (content: string) => {
-    // Special formatting for observation messages
-    if (content.startsWith('Observation:\n')) {
-        return (
-            <div>
-                <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
-                    <PerceptionIcon className="w-4 h-4" />
-                    Observation
-                </div>
-                <pre className="p-4 text-sm text-foreground overflow-x-auto">
-                    <code className="font-mono">{content.replace('Observation:\n', '')}</code>
-                </pre>
-            </div>
-        );
-    }
     const parts = content.split(/(\n)/);
     return parts.map((part, index) =>
       part === '\n' ? <br key={index} /> : <span key={index}>{part}</span>
@@ -311,7 +277,6 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const renderFunctionCalls = (functionCalls: FunctionCall[]) => (
     <div className="mt-2 space-y-3">
         {functionCalls.map((call, index) => {
-            // Custom renderer for code_interpreter
             if (call.name === 'code_interpreter' && call.args.code) {
                 return (
                     <div key={index} className="bg-background rounded-sm my-2 border border-border">
@@ -325,7 +290,6 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
                     </div>
                 )
             }
-            // Default renderer for other function calls
             return (
                 <div key={index} className="bg-background rounded-sm my-2 border border-border">
                     <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
@@ -341,6 +305,28 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
     </div>
 );
 
+const renderFunctionResponse = (response: { name: string; response: any; }) => {
+    // Custom renderers can be added here
+    if (response.name === 'veo_tool' && response.response?.url) {
+        return (
+             <div className="mt-2 space-y-3">
+                <a href={response.response.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">View Generated Video</a>
+            </div>
+        )
+    }
+
+    return (
+        <div className="bg-background rounded-sm my-2 border border-border">
+            <div className="text-xs text-foreground/70 px-4 py-2 border-b border-border flex items-center gap-2">
+                <PerceptionIcon className="w-4 h-4" />
+                Tool Output: <span className="font-semibold text-foreground">{response.name}</span>
+            </div>
+            <pre className="p-4 text-sm text-foreground overflow-x-auto">
+                <code className="font-mono">{typeof response.response.content === 'string' ? response.response.content : JSON.stringify(response.response, null, 2)}</code>
+            </pre>
+        </div>
+    )
+}
 
   const renderPlan = (plan: Plan) => (
     <div className="mt-2 space-y-3">
@@ -383,13 +369,19 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div className={`max-w-xl px-1 ${isUser ? 'order-2' : 'order-1 flex items-start space-x-3'}`}>
-        {!isUser && (
+        {!isUser && message.role !== 'tool' && (
           <div className="w-8 h-8 rounded-sm bg-accent flex-shrink-0 mt-1"></div>
         )}
-        <div className={`rounded-sm px-4 py-3 ${isUser ? 'bg-user-bubble text-foreground' : 'bg-card text-foreground'}`}>
+        {message.role === 'tool' && (
+            <div className="w-8 h-8 rounded-sm bg-background border border-border flex items-center justify-center flex-shrink-0 mt-1">
+                <PerceptionIcon className="w-5 h-5 text-foreground/70" />
+            </div>
+        )}
+        <div className={`rounded-sm px-4 py-3 ${isUser ? 'bg-user-bubble text-foreground' : message.role === 'tool' ? 'bg-transparent w-full' : 'bg-card text-foreground'}`}>
           <div className="prose prose-invert prose-sm max-w-none text-foreground">
             {message.plan ? renderPlan(message.plan) 
               : message.functionCalls ? renderFunctionCalls(message.functionCalls)
+              : message.functionResponse ? renderFunctionResponse(message.functionResponse)
               : message.critique ? renderCritique(message.critique)
               : renderContent(message.content)}
           </div>
@@ -419,7 +411,7 @@ const Message: React.FC<{ message: ChatMessage }> = ({ message }) => {
                 )}
               </div>
             )}
-          {message.isLoading && message.taskType && <div className="mt-2 w-full"><AgentGraphVisualizer taskType={message.taskType} /></div>}
+          {message.isLoading && message.taskType && <div className="mt-2 w-full"><AgentGraphVisualizer taskType={message.taskType} activeStep={message.currentStep ?? 0} /></div>}
           {message.sources && message.sources.length > 0 && (
             <div className="mt-3 pt-3 border-t border-border">
               <h4 className="text-xs font-semibold text-foreground/70 mb-2">Sources:</h4>
@@ -606,14 +598,246 @@ const ChatInput: React.FC<{
   );
 };
 
+
+// --- Agentic Chat Hook ---
+const useAgentChat = (
+    initialMessages: ChatMessage[],
+    persona: Persona,
+    pyodideRef: React.MutableRefObject<any>,
+    isPyodideReady: boolean
+  ) => {
+    const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const chatRef = useRef<(Chat & { _persona?: Persona, _taskType?: TaskType }) | null>(null);
+    const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
+  
+    useEffect(() => {
+      try {
+        localStorage.setItem('agentic-chat-messages', JSON.stringify(messages));
+      } catch (e) {
+        console.error("Failed to save messages to localStorage", e);
+      }
+    }, [messages]);
+
+    const runPythonCode = async (code: string): Promise<string> => {
+        if (!pyodideRef.current) return "Error: Pyodide is not initialized.";
+        try {
+          pyodideRef.current.runPython(`
+            import sys, io
+            sys.stdout = io.StringIO()
+          `);
+          const result = await pyodideRef.current.runPythonAsync(code);
+          const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
+          return stdout || result?.toString() || "Code executed without output.";
+        } catch (err: any) {
+          return `Error: ${err.message}`;
+        }
+    };
+  
+    const processStream = async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string, routedTask: TaskType) => {
+        let fullText = '';
+        let sources: GroundingSource[] = [];
+        let parsedPlan: Plan | undefined;
+        let functionCalls: FunctionCall[] | undefined;
+      
+        for await (const chunk of stream) {
+          if (chunk.text) {
+              fullText += chunk.text;
+          }
+    
+          if (chunk.functionCalls) {
+            functionCalls = chunk.functionCalls.map(fc => ({ name: fc.name, args: fc.args }));
+          }
+          
+          const metadata = chunk.candidates?.[0]?.groundingMetadata as GroundingMetadata | undefined;
+          if (metadata?.groundingChunks) {
+            sources = metadata.groundingChunks
+              .map(c => c.web).filter((web): web is { uri: string, title: string } => !!web?.uri)
+              .map(web => ({ uri: web.uri, title: web.title || '' }));
+          }
+
+          setMessages(prev => prev.map(msg => 
+              msg.id === assistantMessageId ? { ...msg, content: fullText, sources, plan: parsedPlan, functionCalls } : msg
+          ));
+        }
+
+        if (routedTask === TaskType.Planner) {
+            try {
+                parsedPlan = JSON.parse(fullText);
+                setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId ? { ...msg, plan: parsedPlan } : msg
+                ));
+            } catch(e) { /* ignore parse error */ }
+        }
+
+        return { fullText, sources, parsedPlan, functionCalls };
+    };
+
+    const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string) => {
+        if (isLoading || !isPyodideReady) return;
+        setIsLoading(true);
+        setError(null);
+    
+        const userMessage: ChatMessage = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: prompt,
+          file,
+          ...(repoUrl && { repo: { url: repoUrl, owner: '', repo: '' } }),
+        };
+    
+        const currentMessages = [...messages, userMessage];
+        setMessages(currentMessages);
+        
+        const assistantMessageId = (Date.now() + 1).toString();
+
+        try {
+          // 1. Router Agent Call
+          const routerResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: `Classify the user's intent for the following query: "${prompt}"` }] },
+            config: { tools: [{ functionDeclarations: [ROUTER_TOOL] }] }
+          });
+          setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 2 } : msg));
+          
+          let routedTask: TaskType = TaskType.Chat;
+          let complexityScore = 3; // Default complexity
+          if (routerResponse.functionCalls?.[0]) {
+              const { route, complexity_score } = routerResponse.functionCalls[0].args;
+              if (Object.values(TaskType).includes(route as TaskType)) routedTask = route as TaskType;
+              if (complexity_score) complexityScore = complexity_score;
+          }
+          if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
+          
+          setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '', isLoading: true, taskType: routedTask, currentStep: 1 }]);
+    
+          // 2. Prepare for Specialist Agent
+          const parts: Part[] = [{ text: prompt }];
+          if (file) parts.push(fileToGenerativePart(file));
+          
+          let newTaskConfig = JSON.parse(JSON.stringify(TASK_CONFIGS[routedTask]));
+          if (routedTask === TaskType.Complex && complexityScore) {
+              newTaskConfig.config.thinkingConfig = { thinkingBudget: Math.min(32768, Math.floor(complexityScore / 10 * 32768)) };
+          }
+    
+          const isConfigChange = !chatRef.current || chatRef.current._taskType !== routedTask || persona !== chatRef.current?._persona;
+    
+          if (isConfigChange) {
+              const history: Content[] = currentMessages.map(msg => {
+                const messageParts: Part[] = [{ text: msg.content }];
+                if (msg.file) { messageParts.push(fileToGenerativePart(msg.file)); }
+                return { role: msg.role === 'assistant' ? 'model' : msg.role, parts: messageParts };
+              });
+    
+              let systemInstruction = [PERSONA_CONFIGS[persona].instruction];
+              if (newTaskConfig.config?.systemInstruction) {
+                  systemInstruction.push(newTaskConfig.config.systemInstruction.parts[0].text);
+              }
+              
+              chatRef.current = ai.chats.create({
+                  model: newTaskConfig.model,
+                  config: {
+                      ...newTaskConfig.config,
+                      ...(systemInstruction.filter(Boolean).length > 0 && { systemInstruction: { parts: [{ text: systemInstruction.join('\n\n') }] } }),
+                  },
+                  history
+              }) as Chat & { _persona?: Persona, _taskType?: TaskType };
+              chatRef.current._persona = persona;
+              chatRef.current._taskType = routedTask;
+          }
+          
+          // 3. First Turn (User -> Model)
+          const stream1 = await chatRef.current.sendMessageStream({ message: parts });
+          const { functionCalls } = await processStream(stream1, assistantMessageId, routedTask);
+    
+          // 4. Handle Tool Call (PWC Loop for Code Agent)
+          if (functionCalls && functionCalls.length > 0 && functionCalls[0].name === 'code_interpreter') {
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 4 } : msg));
+            const code = functionCalls[0].args.code;
+    
+            // Worker Phase
+            const output = await runPythonCode(code);
+            const toolMessage: ChatMessage = {
+                id: (Date.now() + 2).toString(),
+                role: 'tool',
+                content: '',
+                functionResponse: { name: 'code_interpreter', response: { content: output } }
+            };
+            setMessages(prev => [...prev, toolMessage]);
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 5 } : msg));
+
+            // Critic Phase
+            const critiqueMessageId = (Date.now() + 3).toString();
+            setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique, currentStep: 1 }]);
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 6 } : msg));
+            
+            const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
+            const outputForCritique = `Original Query: ${prompt}\nTool Output: ${output}`;
+    
+            const critiqueResponse = await ai.models.generateContent({
+                model: critiqueConfig.model,
+                contents: { parts: [{ text: outputForCritique }] },
+                config: critiqueConfig.config as any,
+            });
+    
+            let critiqueResult: CritiqueResult | null = null;
+            try {
+              critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
+            } catch(e) {
+              console.error("Failed to parse critique response", e);
+              setError("The critic agent provided a malformed response.");
+            }
+            
+            setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
+            
+            // Synthesis / Reflexion Phase
+            const { faithfulness, coherence, coverage } = critiqueResult?.scores || {};
+            if (critiqueResult && (faithfulness < 4 || coherence < 4 || coverage < 4)) {
+                // Future: Implement retry logic here
+            }
+
+            const finalAnswerId = (Date.now() + 4).toString();
+            setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask, currentStep: 1 }]);
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, currentStep: 7, isLoading: false } : msg));
+            
+            const toolParts: Part[] = [
+                { functionResponse: { name: 'code_interpreter', response: { content: output } } },
+            ];
+            if (critiqueResult) {
+                toolParts.push({ functionResponse: { name: 'critique_feedback', response: critiqueResult } });
+            }
+            
+            const stream2 = await chatRef.current!.sendMessageStream({ message: toolParts });
+            await processStream(stream2, finalAnswerId, routedTask);
+            setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
+
+          } else {
+            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
+          }
+    
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : 'An unknown error occurred.';
+          setError(errorMsg);
+          setMessages(prev => prev.map(msg => msg.isLoading ? { ...msg, content: `Error: ${errorMsg}`, isLoading: false } : msg));
+        } finally {
+          setIsLoading(false);
+        }
+    }, [isLoading, isPyodideReady, ai, persona, messages]);
+
+    return { messages, setMessages, isLoading, error, handleSendMessage };
+};
+
 // --- Main App Component ---
 const App: React.FC = () => {
   const [persona, setPersona] = useState<Persona>(() => {
     const savedPersona = localStorage.getItem('agentic-chat-persona');
     return (savedPersona as Persona) || Persona.Default;
   });
+  const pyodideRef = useRef<any>(null);
+  const [isPyodideReady, setIsPyodideReady] = useState(false);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+  const initialMessages = useMemo(() => {
     try {
       const savedMessages = localStorage.getItem('agentic-chat-messages');
       return savedMessages ? JSON.parse(savedMessages) : [];
@@ -621,19 +845,14 @@ const App: React.FC = () => {
       console.error("Failed to parse messages from localStorage", e);
       return [];
     }
-  });
+  }, []);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isPyodideReady, setIsPyodideReady] = useState(false);
-  const pyodideRef = useRef<any>(null);
-  // FIX: Extend Chat type to hold session metadata (_persona, _taskType)
-  const chatRef = useRef<(Chat & { _persona?: Persona, _taskType?: TaskType }) | null>(null);
+  const { messages, setMessages, isLoading, error, handleSendMessage } = useAgentChat(initialMessages, persona, pyodideRef, isPyodideReady);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
+  useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
 
-  // Load Pyodide on mount
   useEffect(() => {
     async function loadPyodide() {
       try {
@@ -644,231 +863,22 @@ const App: React.FC = () => {
         setIsPyodideReady(true);
       } catch (e) {
         console.error("Pyodide loading failed:", e);
-        setError("Failed to load Python environment.");
       }
     }
     loadPyodide();
   }, []);
-
-  const runPythonCode = async (code: string): Promise<string> => {
-    if (!pyodideRef.current) return "Error: Pyodide is not initialized.";
-    try {
-      // Redirect stdout
-      pyodideRef.current.runPython(`
-        import sys
-        import io
-        sys.stdout = io.StringIO()
-      `);
-      const result = await pyodideRef.current.runPythonAsync(code);
-      const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
-      return stdout || result?.toString() || "Code executed without output.";
-    } catch (err: any) {
-      return `Error: ${err.message}`;
-    }
-  };
-
-  useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
-  useEffect(() => {
-    try {
-      localStorage.setItem('agentic-chat-messages', JSON.stringify(messages));
-    } catch (e) {
-      console.error("Failed to save messages to localStorage", e);
-    }
-  }, [messages]);
-
-  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
 
   const handlePersonaChange = (newPersona: Persona) => {
     if (newPersona === persona) return;
     if (messages.length > 0) {
       if (window.confirm("Changing the persona will start a new conversation. Are you sure?")) {
         setMessages([]);
-        chatRef.current = null; // Reset chat history
         setPersona(newPersona);
       }
     } else {
       setPersona(newPersona);
     }
   };
-
-  const processStream = async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string) => {
-    let fullText = '';
-    let sources: GroundingSource[] = [];
-    let parsedPlan: Plan | undefined;
-    let functionCalls: FunctionCall[] | undefined;
-  
-    for await (const chunk of stream) {
-      if (chunk.text) {
-          fullText += chunk.text;
-      }
-
-      if (chunk.functionCalls) {
-        functionCalls = chunk.functionCalls.map(fc => ({ name: fc.name, args: fc.args }));
-      }
-      
-      if (fullText.includes('{') && fullText.includes('}')) {
-        try {
-            const potentialJson = fullText.substring(fullText.indexOf('{'), fullText.lastIndexOf('}') + 1);
-            const parsed = JSON.parse(potentialJson);
-            if(parsed.plan) parsedPlan = parsed;
-        } catch (e) { /* continue accumulating */ }
-      }
-
-      const metadata = chunk.candidates?.[0]?.groundingMetadata as GroundingMetadata | undefined;
-      if (metadata?.groundingChunks) {
-        sources = metadata.groundingChunks
-          .map(c => c.web).filter((web): web is { uri: string, title: string } => !!web?.uri)
-          .map(web => ({ uri: web.uri, title: web.title || '' }));
-      }
-      setMessages(prev => prev.map(msg => 
-          msg.id === assistantMessageId ? { ...msg, content: fullText, sources, plan: parsedPlan, functionCalls } : msg
-      ));
-    }
-    return { fullText, sources, parsedPlan, functionCalls };
-  };
-
-
-  const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string) => {
-    if (isLoading || !isPyodideReady) return;
-    setIsLoading(true);
-    setError(null);
-
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: prompt,
-      ...(file && { file: { name: file.name, type: file.type } }),
-      ...(repoUrl && { repo: { url: repoUrl, owner: '', repo: '' } }),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    
-    try {
-      // 1. Router Agent Call
-      const routerResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: { parts: [{ text: `Classify the user's intent for the following query: "${prompt}"` }] },
-        config: { tools: [{ functionDeclarations: [ROUTER_TOOL] }] }
-      });
-      
-      let routedTask: TaskType = TaskType.Chat;
-      if (routerResponse.functionCalls?.[0]) {
-          const { route } = routerResponse.functionCalls[0].args;
-          if (Object.values(TaskType).includes(route as TaskType)) routedTask = route as TaskType;
-      }
-      if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
-      
-      const assistantMessageId = (Date.now() + 1).toString();
-      setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '', isLoading: true, taskType: routedTask }]);
-
-      // 2. Prepare for Specialist Agent
-      let analysisPrompt = prompt;
-      let repoDataForUserMessage: RepoData | undefined;
-      // ... (GitHub analysis logic remains the same)
-
-      const parts: Part[] = [{ text: analysisPrompt }];
-      if (file) parts.push(fileToGenerativePart(file));
-      
-      const newTaskConfig = TASK_CONFIGS[routedTask];
-
-      // FIX: Avoid accessing private `model` and `config` properties.
-      // Instead, check if the task type or persona has changed to decide if a new chat session is needed.
-      const isConfigChange = 
-          !chatRef.current || 
-          chatRef.current._taskType !== routedTask ||
-          persona !== chatRef.current?._persona;
-
-      if (isConfigChange) {
-          const history: Content[] = messages.map(msg => ({
-              role: msg.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: msg.content }] // Simplified history
-          }));
-
-          let systemInstruction = [PERSONA_CONFIGS[persona].instruction];
-          const configWithMaybeInstruction = newTaskConfig.config as any;
-          if (configWithMaybeInstruction.systemInstruction) {
-              systemInstruction.push(configWithMaybeInstruction.systemInstruction.parts[0].text);
-          }
-          
-          // FIX: Add _taskType to the extended Chat type and set it after creation.
-          chatRef.current = ai.chats.create({
-              model: newTaskConfig.model,
-              config: {
-                  ...newTaskConfig.config,
-                  ...(systemInstruction.filter(Boolean).length > 0 && { systemInstruction: { parts: [{ text: systemInstruction.join('\n\n') }] } }),
-              },
-              history
-          }) as Chat & { _persona?: Persona, _taskType?: TaskType };
-          chatRef.current._persona = persona;
-          chatRef.current._taskType = routedTask;
-      }
-      
-
-      // 3. First Turn (User -> Model)
-      // FIX: Correct the payload for sendMessageStream. The `message` property should directly receive the array of parts.
-      const stream1 = await chatRef.current.sendMessageStream({ message: parts });
-      const { functionCalls } = await processStream(stream1, assistantMessageId);
-
-      // 4. Handle Tool Call (PWC Loop for Code Agent)
-      if (functionCalls && functionCalls.length > 0 && functionCalls[0].name === 'code_interpreter') {
-          const code = functionCalls[0].args.code;
-
-          // Worker Phase
-          const observationMessageId = (Date.now() + 2).toString();
-          setMessages(prev => [...prev, { id: observationMessageId, role: 'assistant', content: `Executing code...`, isLoading: true, taskType: TaskType.Code }]);
-          const output = await runPythonCode(code);
-          setMessages(prev => prev.map(msg => msg.id === observationMessageId ? { ...msg, content: `Observation:\n${output}`, isLoading: false } : msg));
-
-          // Critic Phase
-          const critiqueMessageId = (Date.now() + 3).toString();
-          setMessages(prev => [...prev, { id: critiqueMessageId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Critique }]);
-          
-          const critiqueConfig = TASK_CONFIGS[TaskType.Critique];
-          const outputForCritique = `Original Query: ${prompt}\nTool Output: ${output}`;
-
-          const critiqueResponse = await ai.models.generateContent({
-              model: critiqueConfig.model,
-              contents: { parts: [{ text: outputForCritique }] },
-              config: critiqueConfig.config as any,
-          });
-
-          let critiqueResult: CritiqueResult | null = null;
-          try {
-            critiqueResult = JSON.parse(critiqueResponse.text) as CritiqueResult;
-          } catch(e) {
-            console.error("Failed to parse critique response", e);
-            setError("The critic agent provided a malformed response.");
-          }
-          
-          setMessages(prev => prev.map(msg => msg.id === critiqueMessageId ? { ...msg, critique: critiqueResult ?? undefined, content: critiqueResult ? '' : 'Critique failed.', isLoading: false } : msg));
-          
-          const { faithfulness, coherence, coverage } = critiqueResult?.scores || {};
-          if (critiqueResult && faithfulness >= 4 && coherence >= 4 && coverage >= 4) {
-              // Synthesis Phase
-              const finalAnswerId = (Date.now() + 4).toString();
-              setMessages(prev => [...prev, { id: finalAnswerId, role: 'assistant', content: '', isLoading: true, taskType: routedTask }]);
-              
-              const toolParts: Part[] = [{ functionResponse: { name: 'code_interpreter', response: { content: output } } }];
-              
-              // FIX: Correct the payload for sendMessageStream.
-              const stream2 = await chatRef.current!.sendMessageStream({ message: toolParts });
-              await processStream(stream2, finalAnswerId);
-              setMessages(prev => prev.map(msg => msg.id === finalAnswerId ? { ...msg, isLoading: false } : msg));
-          } else {
-            setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
-          }
-      } else {
-        setMessages(prev => prev.map(msg => msg.id === assistantMessageId ? { ...msg, isLoading: false } : msg));
-      }
-
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : 'An unknown error occurred.';
-      setError(errorMsg);
-      setMessages(prev => prev.map(msg => msg.isLoading ? { ...msg, content: `Error: ${errorMsg}`, isLoading: false } : msg));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, ai, persona, messages, isPyodideReady]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-foreground font-mono">

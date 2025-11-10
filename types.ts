@@ -24,7 +24,7 @@ export interface GroundingSource {
 }
 
 export interface RepoData {
-  url: string;
+  url:string;
   owner: string;
   repo: string;
   fileTree?: string;
@@ -62,22 +62,19 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
-  file?: {
-    name: string;
-    type: string;
-  };
+  file?: FileData;
   repo?: RepoData;
   sources?: GroundingSource[];
   isLoading?: boolean;
   plan?: Plan;
-  // FIX: Update to support multiple function calls from the API.
-  functionCalls?: FunctionCall[]; // A message can have one or more function calls
+  functionCalls?: FunctionCall[];
   functionResponse?: {
     name: string;
     response: any;
   };
   critique?: CritiqueResult;
   taskType?: TaskType; // Used for visualization of the loading message
+  currentStep?: number; // For WoT visualization
 }
 
 export interface FileData {

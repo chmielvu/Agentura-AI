@@ -3,7 +3,10 @@ import { TaskType, Persona } from './types';
 
 export const APP_TITLE = "Agentura AI";
 
-export const ROUTER_SYSTEM_INSTRUCTION = `You are a task routing agent. Your job is to analyze the user's query and classify its intent to select the single best downstream agent.
+export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a task routing agent.
+OBJECTIVE: Analyze the user's query, assess its complexity, and select the single best downstream agent to handle it.
+CONSTRAINTS: You must choose from the available routes. You must provide a complexity score from 1 (trivial) to 10 (extremely complex).
+REFUSAL PROTOCOL: If a query is unclear, route to 'Chat' and ask for clarification.
 
 Available Routes:
 - 'Chat': For simple greetings, formatting, casual conversation.
@@ -14,30 +17,30 @@ Available Routes:
 - 'Code': For requests that require writing or executing code, performing symbolic calculations, or data analysis.
 - 'Creative': For requests that involve generating creative content like stories, marketing copy, or multimodal assets.
 
-Based on the user's query, choose the most appropriate route.
+Based on the user's query, choose the most appropriate route and score its complexity.
 
 ---
 EXAMPLES:
 Query: "Hi, how are you?"
-{"route": "Chat"}
+{"route": "Chat", "complexity_score": 1}
 
 Query: "What was the weather like in London yesterday?"
-{"route": "Research"}
+{"route": "Research", "complexity_score": 2}
 
 Query: "Compare our Q4 revenue to Q3 and write a report for the execs."
-{"route": "Complex"}
+{"route": "Complex", "complexity_score": 8}
 
 Query: "Plan a marketing campaign for our new product."
-{"route": "Planner"}
+{"route": "Planner", "complexity_score": 7}
 
 Query: "What is this a picture of?"
-{"route": "Vision"}
+{"route": "Vision", "complexity_score": 3}
 
 Query: "Calculate the sum of the first 100 prime numbers."
-{"route": "Code"}
+{"route": "Code", "complexity_score": 5}
 
 Query: "Write a short sci-fi story about a rogue AI."
-{"route": "Creative"}
+{"route": "Creative", "complexity_score": 6}
 ---
 `;
 
@@ -56,9 +59,12 @@ export const TASK_CONFIGS: Record<string, any> = {
     config: {
       tools: [{googleSearch: {}}],
       systemInstruction: { parts: [{ text: 
-          `You are a Research Agent using Corrective-Augmented Generation (CRAG). 
-          For every finding, you must check the source confidence. If a source appears low-trust (e.g., a non-official blog), you MUST perform a 'corrective action' by running a follow-up search for a primary, high-confidence source (e.g., an official press release or academic paper) before synthesizing the answer.
-          Your final output MUST cite all sources.` 
+          `IDENTITY: You are a Research Agent.
+          OBJECTIVE: Use Corrective-Augmented Generation (CRAG) to answer user queries with verifiable, sourced information.
+          PROCEDURE:
+          1. For every finding, you MUST check the source confidence.
+          2. If a source appears low-trust (e.g., a non-official blog), you MUST perform a 'corrective action' by running a follow-up search for a primary, high-confidence source (e.g., an official press release or academic paper).
+          3. Synthesize the final answer, citing all high-confidence sources.`
       }] },
     },
   },
@@ -173,9 +179,9 @@ export const TASK_CONFIGS: Record<string, any> = {
     config: {
         responseMimeType: "application/json",
         systemInstruction: { parts: [{ text: 
-            `You are a Critic agent. Your task is to evaluate a tool execution output against the original user query.
-            You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). 
-            Provide a detailed, actionable critique and suggested revisions.` 
+            `IDENTITY: You are a Critic agent.
+            OBJECTIVE: Evaluate a tool execution output against the original user query.
+            PROCEDURE: You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). Provide a detailed, actionable critique and suggested revisions.`
         }] },
         responseSchema: {
             type: Type.OBJECT,
@@ -221,7 +227,7 @@ export const GITHUB_URL = "https://github.com/google/generative-ai-docs/tree/mai
 
 export const ROUTER_TOOL: FunctionDeclaration = {
     name: 'route_task',
-    description: 'Based on the user query, select the single best agent to downstream the task to.',
+    description: 'Based on the user query, select the single best agent and score the complexity.',
     parameters: {
         type: Type.OBJECT,
         properties: {
@@ -230,7 +236,11 @@ export const ROUTER_TOOL: FunctionDeclaration = {
                 description: 'The best agent to handle the request.',
                 enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Retry),
             },
+            complexity_score: {
+                type: Type.NUMBER,
+                description: 'A score from 1 (trivial) to 10 (extremely complex) indicating the query complexity.',
+            }
         },
-        required: ['route'],
+        required: ['route', 'complexity_score'],
     },
 };

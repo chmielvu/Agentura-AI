@@ -6,15 +6,15 @@ export const APP_VERSION = "2.5.0";
 
 // 1. ROUTER_SYSTEM_INSTRUCTION (Full Implementation)
 // This is the Metaprompt "Constitution" for the Router Agent.
-export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v2.2).
+export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v2.6).
 OBJECTIVE: Analyze the user's query *in the context of the recent chat history*. You must assess its complexity and select the single best downstream specialist agent to handle it.
 CONSTRAINTS:
 1. You MUST choose from the available routes.
 2. You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
 3. Stateless queries (e.g., "Hi") are 'Chat'.
 4. Queries requiring web access are 'Research'.
-5. Queries requiring code generation/execution are 'Code'.
-6. Queries asking for a plan are 'Planner'.
+5. Queries requiring code generation/execution are 'Code'. (Developer Mode Only)
+6. Queries asking for a plan are 'Planner'. (Developer Mode Only)
 7. Queries including an image are 'Vision'.
 8. Complex, multi-step, or ambiguous goals are 'Complex'.
 9. Queries about failed tasks or asking for a retry are 'Retry'.
@@ -158,7 +158,7 @@ export const TASK_CONFIGS: Record<string, any> = {
     },
   },
   [TaskType.Vision]: {
-    model: 'gemini-flash-latest', // Use Pro for more complex vision
+    model: 'gemini-2.5-pro',
     title: 'Vision Agent',
     description: 'Upload an image and ask questions about it.',
     config: {},

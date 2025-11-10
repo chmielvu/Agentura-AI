@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Persona } from './types';
+import { Persona, ChatMode } from './types';
 import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
@@ -7,18 +7,22 @@ import { ChatInput } from './ui/components/ChatInput';
 import { HUD } from './ui/components/HUD';
 import DebuggerModal from './components/Debugger';
 
+const getInitialMode = () => (localStorage.getItem('agentic-chat-mode') as ChatMode) || ChatMode.Normal;
+
 const App: React.FC = () => {
   const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem('agentic-chat-persona') as Persona) || Persona.Default);
+  const [mode, setMode] = useState<ChatMode>(getInitialMode);
   const pyodideRef = useRef<any>(null);
   const [isPyodideReady, setIsPyodideReady] = useState(false);
   const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
 
-  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, pyodideRef);
+  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, mode, pyodideRef);
   const { messages, isLoading } = state;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
   useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
+  useEffect(() => localStorage.setItem('agentic-chat-mode', mode), [mode]);
 
   useEffect(() => {
     async function load() {
@@ -31,11 +35,17 @@ const App: React.FC = () => {
     load();
   }, []);
 
-  const handlePersonaChange = (newPersona: Persona) => {
-    if (newPersona === persona) return;
-    if (messages.length > 0 && window.confirm("Changing persona will clear the conversation. Continue?")) {
+  const handleModeChange = (newMode: ChatMode) => {
+    if (newMode === mode) return;
+    if (messages.length > 0 && window.confirm("Changing chat mode will clear the conversation. Continue?")) {
         setMessages([]);
     }
+    setMode(newMode);
+  };
+
+  const handlePersonaChange = (newPersona: Persona) => {
+    if (newPersona === persona) return;
+    // Persona can be changed mid-conversation without clearing
     setPersona(newPersona);
   };
   
@@ -44,13 +54,9 @@ const App: React.FC = () => {
     const fc = msg?.functionCalls?.find(f => f.id === functionCallId);
     if (!msg || !fc || !pyodideRef.current) return;
     
-    // The `onComplete` for the debugger will re-trigger the PWC loop by calling `handleExecuteCode`.
     setDebugSession({
       code: fc.args.code,
       onComplete: (output: string) => {
-        // The orchestrator's `continueCodePwcLoop` needs the output. We can pass it via `handleExecuteCode`.
-        // This is a simplification; a real implementation might pass a callback.
-        // For now, we simulate the user clicking "execute" after debugging is done.
         handleExecuteCode(messageId, functionCallId, output);
         setDebugSession(null);
       },
@@ -62,7 +68,7 @@ const App: React.FC = () => {
       {debugSession && (
         <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
       )}
-      <Header persona={persona} onPersonaChange={handlePersonaChange} />
+      <Header persona={persona} onPersonaChange={handlePersonaChange} mode={mode} onModeChange={handleModeChange} />
       <HUD isLoading={isLoading} isPyodideReady={isPyodideReady} messages={messages} />
       
       <main className="flex-1 overflow-y-auto pt-40 pb-4" aria-live="polite">
@@ -81,6 +87,7 @@ const App: React.FC = () => {
                     onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
                     onDebugCode={handleDebugCode}
                     onExecutePlan={handleExecutePlan}
+                    onRetryPlan={handleExecutePlan}
                 />
               ))}
               <div ref={messagesEndRef} />

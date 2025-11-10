@@ -10,6 +10,12 @@ export enum TaskType {
   Retry = 'Retry',
 }
 
+// NEW ENUM: Defines the operational mode of the chat client.
+export enum ChatMode {
+  Normal = 'Normal',
+  Developer = 'Developer',
+}
+
 export enum Persona {
   Default = 'Default',
   Creative = 'Creative',

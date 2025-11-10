@@ -1,14 +1,15 @@
 import React from 'react';
 import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource } from '../../types';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
-import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, StopIcon } from '../../components/Icons';
+import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon } from '../../components/Icons';
 
 export const Message: React.FC<{ 
     message: ChatMessage;
     onExecuteCode: (messageId: string, functionCallId: string) => void;
     onDebugCode: (messageId: string, functionCallId: string) => void;
     onExecutePlan: (plan: Plan) => void;
-}> = ({ message, onExecuteCode, onDebugCode, onExecutePlan }) => {
+    onRetryPlan: (plan: Plan) => void;
+}> = ({ message, onExecuteCode, onDebugCode, onExecutePlan, onRetryPlan }) => {
   const isUser = message.role === 'user';
 
   const renderContent = (content: string) => {
@@ -59,32 +60,45 @@ export const Message: React.FC<{
     }
   }
 
-  const renderPlan = (plan: Plan) => (
-    <div className="mt-2 space-y-3">
-        <div className="flex justify-between items-center">
-            <h4 className="text-sm font-semibold text-foreground/80">Generated Plan:</h4>
-            {!plan.plan.some(p => p.status === 'in-progress' || p.status === 'completed') && (
-                <button 
-                    onClick={() => onExecutePlan(plan)}
-                    className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm transition-colors flex items-center gap-1.5"
-                >
-                    <PlayIcon className="w-3 h-3"/> Run This Plan
-                </button>
-            )}
-        </div>
-        {plan.plan.map((step) => (
-            <div key={step.step_id} className="p-3 bg-card/50 rounded-sm border border-border">
-                <div className="flex justify-between items-start">
-                    <p className="font-semibold text-foreground flex-1">Step {step.step_id}: {step.description}</p>
-                    {renderPlanStepStatus(step.status)}
-                </div>
-                <div className="mt-2 text-xs space-y-1 text-foreground/70">
-                    <p>Tool: <span className="font-medium text-foreground/80">{step.tool_to_use}</span></p>
-                </div>
+  const renderPlan = (plan: Plan) => {
+    const hasFailedStep = plan.plan.some(p => p.status === 'failed');
+    const allPending = plan.plan.every(p => p.status === 'pending');
+
+    return (
+        <div className="mt-2 space-y-3">
+            <div className="flex justify-between items-center">
+                <h4 className="text-sm font-semibold text-foreground/80">Generated Plan:</h4>
+                {allPending && (
+                    <button 
+                        onClick={() => onExecutePlan(plan)}
+                        className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm transition-colors flex items-center gap-1.5"
+                    >
+                        <PlayIcon className="w-3 h-3"/> Run This Plan
+                    </button>
+                )}
+                {hasFailedStep && (
+                     <button 
+                        onClick={() => onRetryPlan(plan)}
+                        className="text-xs bg-yellow-600/80 hover:bg-yellow-600 text-white px-3 py-1 rounded-sm transition-colors flex items-center gap-1.5"
+                    >
+                        <RetryIcon className="w-3 h-3"/> Retry Failed Steps
+                    </button>
+                )}
             </div>
-        ))}
-    </div>
-  );
+            {plan.plan.map((step) => (
+                <div key={step.step_id} className="p-3 bg-card/50 rounded-sm border border-border">
+                    <div className="flex justify-between items-start">
+                        <p className="font-semibold text-foreground flex-1">Step {step.step_id}: {step.description}</p>
+                        {renderPlanStepStatus(step.status)}
+                    </div>
+                    <div className="mt-2 text-xs space-y-1 text-foreground/70">
+                        <p>Tool: <span className="font-medium text-foreground/80">{step.tool_to_use}</span></p>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+  };
 
   const renderCritique = (critique: CritiqueResult) => ( /* ... (implementation from v2.3 App.tsx) ... */ 
     <div className="mt-2 space-y-3">

@@ -1,14 +1,14 @@
 /**
- * Agentura AI (v2.5) - Modular Orchestrator Hook (useReducer Refactor)
+ * Agentura AI (v2.6) - Modular Orchestrator Hook (useReducer Refactor)
  *
  * This hook is the core of the v2.5 refactor. It isolates all complex
- * agentic orchestration logic from the UI, providing a clean API to the
+ * agentic orchestration logic from the UI, providing a clean API to the 
  * main App component. It manages state, PWC loops, tool calls, and retries
  * through a centralized reducer for robust and persistent state management.
  */
-import React, { useReducer, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
-import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState } from '../../types';
+import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, ChatMode } from '../../types';
 import { APP_VERSION, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
@@ -65,7 +65,7 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
             };
         case 'SET_LOADING':
             return { ...state, isLoading: action.payload };
-        case 'UPDATE_WORKFLOW_STATE': {
+        case 'UPDATE_WORKFLOW_STATE': { 
             const { messageId, nodeId, state: stateUpdate } = action.payload;
             return {
                 ...state,
@@ -117,6 +117,7 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
 
 export const useModularOrchestrator = (
     persona: Persona,
+    mode: ChatMode,
     pyodideRef: React.MutableRefObject<any>
 ) => {
     const [state, dispatch] = useReducer(orchestratorReducer, initialState);
@@ -216,9 +217,11 @@ export const useModularOrchestrator = (
             await executeComplexPwcLoop(fullText);
         } else if (functionCalls && functionCalls.length > 0) {
             if (functionCalls.some(fc => fc.name === 'code_interpreter')) {
+                // This is Program-of-Thought (PoT) - allows Code execution in both modes
                 updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { function_calls: functionCalls } });
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, functionCalls: functionCalls.map(fc => ({...fc, isAwaitingExecution: true})) } } });
             } else {
+                // Mock tool execution for other tools (Veo, MusicFX)
                 let toolParts: Part[] = [];
                 for (const call of functionCalls) {
                     let responseContent: any = { content: `(Mock) Tool call to '${call.name}' handled.` };
@@ -231,6 +234,7 @@ export const useModularOrchestrator = (
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
             }
         } else {
+            // This includes Planner/Code tasks that were downgraded to Chat in Normal Mode
             updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { output: fullText } });
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
             if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
@@ -258,6 +262,7 @@ export const useModularOrchestrator = (
                 const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
                 dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
 
+                // ADAPTIVE ROUTING: Use gemini-2.5-flash for speed/cost
                 const routerHistory = fullHistory.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
                 const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
                 routedTask = routerResp.functionCalls?.[0]?.args.route as TaskType || TaskType.Chat;
@@ -268,6 +273,20 @@ export const useModularOrchestrator = (
 
             if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
             
+            // CRITICAL ARCHITECTURAL HOOK: Block Code/Planner tasks for app modification in Normal Mode
+            if (mode === ChatMode.Normal) {
+                // If the user attempts to run a Code or Planner task in Normal Mode, force it to Chat.
+                if (routedTask === TaskType.Code || routedTask === TaskType.Planner) {
+                    routedTask = TaskType.Chat;
+
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: `**Mode Constraint:** Task routed to *Chat* mode. To perform code generation, planning, or app file modification, please switch to **Developer** mode in the header.`, isLoading: false } } });
+                    if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+                    return; // EXIT EXECUTION
+                }
+            }
+
+
+            const taskConfig = TASK_CONFIGS[routedTask];
             const graphConfig = agentGraphConfigs[routedTask];
             const workflowState: WorkflowState = {};
             if (graphConfig) {
@@ -278,7 +297,6 @@ export const useModularOrchestrator = (
 
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { taskType: routedTask, workflowState } } });
 
-            const taskConfig = TASK_CONFIGS[routedTask];
             const personaInstruction = PERSONA_CONFIGS[persona].instruction;
             const systemInstruction = [personaInstruction, taskConfig.config?.systemInstruction?.parts[0]?.text].filter(Boolean).join('\n\n');
             const history: Content[] = fullHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{text: m.content}] }));
@@ -309,8 +327,8 @@ export const useModularOrchestrator = (
             if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
             throw e; // Re-throw for plan execution to catch
         }
-    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch]);
-    
+    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode]); // ADD mode to dependencies
+
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         const msg = state.messages.find(m => m.id === messageId);
         const fc = msg?.functionCalls?.find(f => f.id === functionCallId);

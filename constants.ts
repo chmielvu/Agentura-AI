@@ -132,6 +132,21 @@ export const TASK_CONFIGS: Record<string, any> = {
     title: 'Planner Agent',
     description: 'Decomposes a complex goal into a step-by-step plan.',
     config: {
+      tools: [{
+        functionDeclarations: [{
+          name: 'apo_refine',
+          description: 'Auto-Prompt Optimization (APO). Call this to generate a new, improved prompt or plan step description based on a failed attempt and an error message or critique.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              original_prompt: { type: Type.STRING, description: 'The user query or goal that led to the failed attempt.' },
+              failed_output: { type: Type.STRING, description: 'The text of the failed v1 output, or the description of the failed plan step.'},
+              critique: { type: Type.STRING, description: 'The critique or error message of the failed output.' },
+            },
+            required: ['original_prompt', 'failed_output', 'critique'],
+          },
+        }]
+      }],
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,

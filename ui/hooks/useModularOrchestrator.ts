@@ -216,64 +216,6 @@ export const useModularOrchestrator = (
         updateWorkflowState(assistantMessageId, 4, { status: 'completed' });
         
     }, [ai, state.messages, updateWorkflowState, processStream, dispatch]);
-
-    const handleStreamEnd = useCallback(async (chat: Chat, assistantMessageId: string, routedTask: TaskType, originalUserQuery: string, streamOutput: { fullText: string; sources: GroundingSource[], functionCalls?: FunctionCall[] }, manageLoadingState: boolean) => {
-        const { fullText, sources, functionCalls } = streamOutput;
-
-        const executeComplexPwcLoop = async (v1Output: string) => {
-            updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { v1_output: v1Output } });
-            
-            updateWorkflowState(assistantMessageId, 3, { status: 'running', details: { input_for_critique: `Query: ${originalUserQuery}\n\nOutput (first 500 chars): ${v1Output.substring(0, 500)}...` } });
-            const criticConfig = TASK_CONFIGS[TaskType.Critique];
-            let critique: CritiqueResult | null = null;
-            try {
-                // Pass sources to the critic for Research tasks
-                const critiqueInput = `Query: ${originalUserQuery}\nOutput: ${v1Output}` + (sources.length > 0 ? `\nSources: ${JSON.stringify(sources)}` : '');
-                const resp = await ai.models.generateContent({ model: criticConfig.model, contents: { parts: [{ text: critiqueInput }] }, config: criticConfig.config });
-                critique = JSON.parse(resp.text) as CritiqueResult;
-                updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: critique });
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { critique } } });
-            } catch (e: any) {
-                updateWorkflowState(assistantMessageId, 3, { status: 'failed', details: { error: e.message || "Unknown error parsing critique" } });
-            }
-            
-            const avgScore = critique ? (critique.scores.faithfulness + critique.scores.coherence + critique.scores.coverage) / 3 : 5;
-            
-            if (critique && avgScore < 4 && retryCountRef.current < 1) {
-                retryCountRef.current++;
-                updateWorkflowState(assistantMessageId, 4, { status: 'running', details: { reason: 'Critique score low. Handing off to Retry agent.', critique } });
-                const retryMsgId = Date.now().toString();
-                
-                const retryAssistantMsg: ChatMessage = { id: retryMsgId, role: 'assistant', isLoading: true, content: '', taskType: TaskType.Retry, workflowState: { 'node-1': { status: 'running' } }};
-                dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: retryAssistantMsg }});
-
-                const retryPrompt = `Critique: ${critique.critique}. Retry query: ${originalUserQuery}`;
-                const stream = await chat.sendMessageStream({ message: [{ text: retryPrompt }] });
-                await processStream(stream, retryMsgId);
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: retryMsgId, update: { isLoading: false } } });
-                updateWorkflowState(assistantMessageId, 4, { status: 'completed', details: { reason: 'Handed off to Retry agent.', critique } });
-            } else {
-                updateWorkflowState(assistantMessageId, 4, { status: 'completed', details: { reason: 'Final answer synthesized.', ...(critique && { critique: critique }) } });
-                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
-            }
-        };
-
-        if (routedTask === TaskType.Complex || routedTask === TaskType.Research) {
-            await executeComplexPwcLoop(fullText);
-        } else if (functionCalls && functionCalls.length > 0) {
-            if (functionCalls.some(fc => fc.name === 'code_interpreter')) {
-                updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { function_calls: functionCalls } });
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, functionCalls: functionCalls.map(fc => ({...fc, isAwaitingExecution: true})) } } });
-                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
-            } else {
-                // ... (mock tool execution logic)
-            }
-        } else {
-            updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { output: fullText } });
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
-            if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
-        }
-    }, [ai, updateWorkflowState, processStream, dispatch]);
     
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true): Promise<ChatMessage> => {
         return new Promise(async (resolve, reject) => {
@@ -294,12 +236,6 @@ export const useModularOrchestrator = (
             
             const assistantMsgId = Date.now().toString();
             let finalAssistantMessage: ChatMessage | null = null;
-            
-            // This function will be called by handleStreamEnd to resolve the promise
-            const messageCompleteCallback = (message: ChatMessage) => {
-                finalAssistantMessage = message;
-                resolve(message);
-            };
 
             const fullHistory = [...state.messages];
 
@@ -353,29 +289,132 @@ export const useModularOrchestrator = (
                 const stream = await chat.sendMessageStream({ message: parts });
                 const streamOutput = await processStream(stream, assistantMsgId);
                 
-                await handleStreamEnd(chat, assistantMsgId, routedTask, prompt, streamOutput, manageLoadingState);
+                // This is a new wrapper function around handleStreamEnd
+                const finalizeTurn = async () => {
+                    await handleStreamEnd(chat, assistantMsgId, routedTask!, prompt, streamOutput, manageLoadingState);
+                    setTimeout(() => {
+                        const finalMsg = state.messages.find(m => m.id === assistantMsgId && !m.isLoading);
+                         if (finalMsg) {
+                            resolve(finalMsg);
+                        } else {
+                            const fallbackMsg = state.messages.find(m => m.id === assistantMsgId) || {id: assistantMsgId, role:'assistant', content: streamOutput.fullText};
+                            resolve(fallbackMsg as ChatMessage)
+                        }
+                    }, 100);
+                }
 
-                // After handleStreamEnd completes, the final message should be in state
-                // This is a bit of a hack to wait for the state to update
-                setTimeout(() => {
-                    const finalMsg = state.messages.find(m => m.id === assistantMsgId && !m.isLoading);
-                    if (finalMsg) {
-                        resolve(finalMsg);
-                    } else if (finalAssistantMessage) {
-                        resolve(finalAssistantMessage)
-                    } else {
-                         // Fallback in case state update is slow
-                        const fallbackMsg = state.messages.find(m => m.id === assistantMsgId) || {id: assistantMsgId, role:'assistant', content: streamOutput.fullText};
-                        resolve(fallbackMsg as ChatMessage)
-                    }
-                }, 100);
+                await finalizeTurn();
 
             } catch(e: any) {
                 handleApiError(e, assistantMsgId, manageLoadingState);
                 reject(e);
             }
         });
-    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode, handleApiError]);
+    }, [state.isLoading, state.messages, ai, persona, processStream, dispatch, mode, handleApiError]);
+
+    const executePreSynthesisCrag = useCallback(async (assistantMessageId: string, originalUserQuery: string, v1Text: string, sources: GroundingSource[], manageLoadingState: boolean) => {
+        if (retryCountRef.current >= 1) { // Allow only one retry
+            updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: { reason: "Max retries reached. Finalizing." } });
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
+            if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+            return;
+        }
+    
+        updateWorkflowState(assistantMessageId, 3, { status: 'running', details: { v1_output: v1Text.substring(0, 200) + '...', sources_found: sources.length } });
+        
+        // Programmatic LLM call to evaluate sources
+        const evaluatorPrompt = `You are a Source Evaluator. Given the user's [Query] and the [Sources] found, determine if the sources are sufficient (high-quality, relevant, and comprehensive) to write a high-confidence answer.
+    [Query]: ${originalUserQuery}
+    [Sources]: ${JSON.stringify(sources.map(s => ({ title: s.title, uri: s.uri })), null, 2)}
+    
+    Respond with only a single, valid JSON object with the format: { "is_sufficient": boolean, "critique": "A brief explanation of your decision." }`;
+    
+        try {
+            const evaluatorResp = await ai.models.generateContent({
+                model: 'gemini-2.5-flash', // Use a fast model for evaluation
+                contents: { parts: [{ text: evaluatorPrompt }] },
+                config: { responseMimeType: "application/json" }
+            });
+            
+            const evaluation = JSON.parse(evaluatorResp.text) as { is_sufficient: boolean, critique: string };
+    
+            if (evaluation.is_sufficient) {
+                updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: { ...evaluation, final_answer: v1Text.substring(0, 200) + '...' } });
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
+                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+    
+            } else {
+                // CRAG: Corrective step
+                retryCountRef.current++;
+                updateWorkflowState(assistantMessageId, 3, { status: 'failed', details: { ...evaluation, reason: "Sources were insufficient. Retrying." } });
+                
+                const retryPrompt = `The previous research attempt had insufficient sources. Critique: "${evaluation.critique}". Please perform a new, more thorough web search to answer the original query: "${originalUserQuery}"`;
+                await handleSendMessage(retryPrompt, undefined, undefined, TaskType.Research, false, manageLoadingState);
+            }
+    
+        } catch (e: any) {
+            updateWorkflowState(assistantMessageId, 3, { status: 'failed', details: { error: "Source evaluator failed.", originalError: e.message } });
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
+            if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+        }
+    }, [ai, updateWorkflowState, handleSendMessage]);
+
+    const handleStreamEnd = useCallback(async (chat: Chat, assistantMessageId: string, routedTask: TaskType, originalUserQuery: string, streamOutput: { fullText: string; sources: GroundingSource[], functionCalls?: FunctionCall[] }, manageLoadingState: boolean) => {
+        const { fullText, sources, functionCalls } = streamOutput;
+
+        const executeComplexPwcLoop = async (v1Output: string) => {
+            updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { v1_output: v1Output.substring(0, 200) + '...' } });
+            
+            updateWorkflowState(assistantMessageId, 3, { status: 'running', details: { input_for_critique: `Query: ${originalUserQuery}\n\nOutput (first 200 chars): ${v1Output.substring(0, 200)}...` } });
+            const criticConfig = TASK_CONFIGS[TaskType.Critique];
+            let critique: CritiqueResult | null = null;
+            try {
+                const critiqueInput = `Query: ${originalUserQuery}\nOutput: ${v1Output}`;
+                const resp = await ai.models.generateContent({ model: criticConfig.model, contents: { parts: [{ text: critiqueInput }] }, config: criticConfig.config });
+                critique = JSON.parse(resp.text) as CritiqueResult;
+                updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: critique });
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { critique } } });
+            } catch (e: any) {
+                updateWorkflowState(assistantMessageId, 3, { status: 'failed', details: { error: e.message || "Unknown error parsing critique" } });
+            }
+            
+            const avgScore = critique ? (critique.scores.faithfulness + critique.scores.coherence + critique.scores.coverage) / 3 : 5;
+            
+            if (critique && avgScore < 4 && retryCountRef.current < 1) {
+                retryCountRef.current++;
+                updateWorkflowState(assistantMessageId, 4, { status: 'running', details: { reason: 'Critique score low. Handing off to Retry agent.', critique } });
+                
+                const retryPrompt = `Critique: ${critique.critique}. Retry query: ${originalUserQuery}`;
+                const stream = await chat.sendMessageStream({ message: [{ text: retryPrompt }] });
+                const retryStreamOutput = await processStream(stream, assistantMessageId); // Stream into the same message
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, content: retryStreamOutput.fullText, critique: undefined } } }); // Clear critique
+                updateWorkflowState(assistantMessageId, 4, { status: 'completed' });
+
+            } else {
+                updateWorkflowState(assistantMessageId, 4, { status: 'completed', details: { reason: 'Final answer synthesized.', ...(critique && { critique: critique }) } });
+                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+            }
+        };
+
+        if (routedTask === TaskType.Complex) {
+            await executeComplexPwcLoop(fullText);
+        } else if (routedTask === TaskType.Research) {
+            await executePreSynthesisCrag(assistantMessageId, originalUserQuery, fullText, sources, manageLoadingState);
+        } else if (functionCalls && functionCalls.length > 0) {
+            if (functionCalls.some(fc => fc.name === 'code_interpreter')) {
+                updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { function_calls: functionCalls } });
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, functionCalls: functionCalls.map(fc => ({...fc, isAwaitingExecution: true})) } } });
+                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+            } else {
+                // ... (mock tool execution logic)
+            }
+        } else {
+            updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { output: fullText.substring(0, 200) + '...' } });
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
+            if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+        }
+    }, [ai, updateWorkflowState, processStream, dispatch, executePreSynthesisCrag]);
+    
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         const msg = state.messages.find(m => m.id === messageId);

@@ -27,7 +27,7 @@ export const Header: React.FC<{
   };
 
   return (
-    <header className="bg-card p-4 border-b border-border fixed top-0 left-0 right-0 z-20">
+    <header className="bg-card p-4 border-b border-border z-20">
       <div className="max-w-4xl mx-auto">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center space-x-3">

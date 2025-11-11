@@ -8,6 +8,9 @@ export enum TaskType {
   Creative = 'Creative',
   Critique = 'Critique',
   Retry = 'Retry',
+  // FIX: Add missing Embedder and ManualRAG task types.
+  Embedder = 'Embedder',
+  ManualRAG = 'ManualRAG',
 }
 
 // NEW ENUM: Defines the operational mode of the chat client.

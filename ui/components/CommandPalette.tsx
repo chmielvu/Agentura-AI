@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect } from 'react';
 import { TaskType, WorkflowState } from '../../types';
 import { TASK_CONFIGS } from '../../constants';
@@ -32,13 +33,6 @@ interface CommandPaletteProps {
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ lastTask }) => {
     const [view, setView] = useState<'palette' | 'graph'>('palette');
-    
-    // Automatically switch to graph view when a new task starts
-    useEffect(() => {
-        if (lastTask) {
-            setView('graph');
-        }
-    }, [lastTask?.workflowState?.['node-1']?.startTime]); // Trigger only when a new task truly begins
     
     return (
         <div className="border border-border p-4 h-full rounded-sm bg-card/50 flex flex-col">

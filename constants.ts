@@ -7,21 +7,23 @@ export const APP_VERSION = "3.0.0"; // ENHANCED: Updated version
 // 1. ROUTER_SYSTEM_INSTRUCTION (Full Implementation)
 // This is the Metaprompt "Constitution" for the Router Agent.
 export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v3.0).
-OBJECTIVE: Analyze the user's query *in the context of the recent chat history*. You must assess its complexity and select the single best downstream specialist agent to handle it.
+OBJECTIVE: Analyze the user's query in the context of the recent chat history. You must assess its complexity and select the single best downstream specialist agent to handle it.
 CONSTRAINTS:
-1. You MUST choose from the available routes.
-2. You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
-3. Stateless queries (e.g., "Hi") are 'Chat'.
-4. Queries requiring web access are 'Research'.
-5. Queries requiring code generation/execution are 'Code'.
-6. Queries asking for a plan are 'Planner'. (Developer Mode Only)
-7. Queries including an image are 'Vision'.
-8. Complex, multi-step, or ambiguous goals are 'Complex'.
-9. Queries about failed tasks or asking for a retry are 'Retry'.
-10. You MUST adhere to the Refusal Protocol.
+- You MUST choose from the available routes.
+- You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
+- Stateless queries (e.g., "Hi") are 'Chat'.
+- Queries requiring web access are 'Research'.
+- Queries requiring code generation/execution are 'Code'.
+- Queries asking for a plan are 'Planner'. (Developer Mode Only)
+- Queries including an image are 'Vision'.
+- Complex, multi-step, or ambiguous goals are 'Complex'.
+- Queries about failed tasks or asking for a retry are 'Retry'.
+- Queries to embed a document are 'Embedder'.
+- Queries for the local corpus are 'ManualRAG'.
+- You MUST adhere to the Refusal Protocol.
 
 STATEFUL ROUTING:
-- Simple follow-ups (e.g., "why?", "explain that again") about a complex topic MUST be routed to the *previous* specialist agent (e.g., 'Research', 'Code'), NOT 'Chat'.
+- Simple follow-ups (e.g., "why?", "explain that again") about a complex topic MUST be routed to the previous specialist agent (e.g., 'Research', 'Code'), NOT 'Chat'.
 
 REFUSAL PROTOCOL:
 - If a query is illegal, harmful, or unethical, you MUST route to 'Chat' and output only the text: "This request violates my operational constraints."
@@ -36,10 +38,11 @@ Available Routes:
 - 'Code': For mathematical/logical computation, PoT, or pure code generation.
 - 'Creative': For generating stories, media prompts, or creative writing.
 - 'Retry': For requests to retry a failed task, often following a critique.
+- 'Embedder': For embedding a document into the local RAG corpus.
+- 'ManualRAG': For answering questions using the local RAG corpus.
 
 Based on the user's query and history, choose the most appropriate route and score its complexity.
 
----
 EXAMPLES:
 Query: "Hi, how are you?"
 History: []
@@ -60,7 +63,10 @@ History: []
 Query: "That plan is bad, try again."
 History: [User: "Generate a plan...", Assistant: (Plan JSON)]
 {"route": "Retry", "complexity_score": 6}
----
+
+Query: "/embed_doc (with file)"
+History: []
+{"route": "Embedder", "complexity_score": 2}
 `;
 
 // 2. ROUTER_TOOL (Full Implementation)
@@ -84,7 +90,48 @@ export const ROUTER_TOOL: FunctionDeclaration = {
     },
 };
 
-// 3. AGENT METAPROMPTS (TASK_CONFIGS)
+// 3. NEWLY DEFINED SOURCE EVALUATOR TOOL
+export const SOURCE_EVALUATOR_TOOL: FunctionDeclaration = {
+    name: 'source_evaluator_tool',
+    description: 'Evaluates a list of search results against a user query for quality, relevance, and sufficiency.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: { type: Type.STRING, description: 'The original user query.' },
+            domain: { type: Type.STRING, description: "The query's domain ('Technical' or 'Non-Technical')." },
+            sourcing_policy: { type: Type.STRING, description: 'The sourcing policy to evaluate against.' },
+            sources: {
+                type: Type.ARRAY,
+                description: 'The array of search results from googleSearch.',
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        url: { type: Type.STRING },
+                        snippet: { type: Type.STRING },
+                        sourceTitle: { type: Type.STRING },
+                    }
+                }
+            }
+        },
+        required: ['query', 'domain', 'sourcing_policy', 'sources'],
+    },
+    // The response schema for the tool itself
+    response: {
+        type: Type.OBJECT,
+        properties: {
+            is_sufficient: { type: Type.BOOLEAN, description: 'True if sources are high-quality and sufficient to answer the query.' },
+            critique: { type: Type.STRING, description: 'A brief critique of the sources, noting gaps or low-quality results.' },
+            refined_queries: {
+                type: Type.ARRAY,
+                description: 'A list of new, refined search queries to use if is_sufficient is false.',
+                items: { type: Type.STRING }
+            }
+        }
+    }
+};
+
+
+// 4. AGENT METAPROMPTS (TASK_CONFIGS)
 export const TASK_CONFIGS: Record<string, any> = {
   [TaskType.Chat]: {
     model: 'gemini-2.5-flash',
@@ -97,17 +144,41 @@ export const TASK_CONFIGS: Record<string, any> = {
     title: 'Research Swarm Agent (CRAG)',
     description: 'Performs high-quality, grounded research using critical evaluation.',
     config: {
-      tools: [{googleSearch: {}}],
+      // UPDATED: Agent now has access to both googleSearch and the new evaluator tool.
+      tools: [{ googleSearch: {} }, { functionDeclarations: [SOURCE_EVALUATOR_TOOL] }],
       systemInstruction: { parts: [{ text: 
-          `IDENTITY: You are a Research Swarm Controller, synthesizing the output of multiple search agents.
-          OBJECTIVE: Answer the user's query with a high-confidence, comprehensive, and cited report. Your output MUST be auditable.
-          PROCEDURE (CRAG-like Logic):
-          1. Generate multiple, diverse search queries to avoid bias.
-          2. Perform the 'googleSearch' tool call.
-          3. Critically evaluate the retrieved sources for reliability and completeness. (CRAG Step: If sources are low quality, adjust your search and try again once).
-          4. Synthesize the final answer using information ONLY from the verified sources.
-          5. You MUST provide detailed citations for every fact you present.
-          6. If your v1 output receives a critique about poor sources, your v2 answer MUST begin with a new 'googleSearch' call to find better sources.`
+          `IDENTITY: You are a Research Swarm Controller with domain-adaptive intelligence.
+          OBJECTIVE: Answer the user's query with a high-confidence, comprehensive, and cited report. Your output MUST be auditable and grounded.
+
+      PROCEDURE (Domain-Adaptive Hard CRAG):
+      1.  [ANALYZE DOMAIN]: First, analyze the user's query: "\${"{{user_query}}"}". Classify its primary domain as either 'Technical' (e.g., programming, engineering, AI, science) or 'Non-Technical' (e.g., history, media, art, psychology, humanities).
+
+      2.  [SET SOURCING POLICY]: Based on the domain, you MUST adopt *one* of the following sourcing policies. This policy will govern your search and evaluation.
+          *   IF 'Technical':
+              POLICY: "Prioritize official documentation (e.g., ai.google.dev, googleapis.github.io), academic papers (e.g., arxiv.org, Google Scholar), and high-quality technical repositories (e.g., high-star GitHub projects)."
+          *   IF 'Non-Technical':
+              POLICY: "Prioritize peer-reviewed journals (e.g., JSTOR, university sites), academic press books, reputable journalistic organizations (e.g., Reuters, AP, BBC), and established encyclopedic sources."
+      
+      3.  [GENERATE QUERIES]: Generate 3-5 diverse, high-quality search queries to find accurate and comprehensive information. These queries MUST be designed to find sources matching your active [SOURCING POLICY].
+
+      4.  [CALL TOOL: googleSearch]: Execute the 'googleSearch' tool with your generated queries.
+
+      5.  [CALL TOOL: source_evaluator_tool]: Execute the 'source_evaluator_tool'. You MUST pass it:
+          a.  The original 'query'.
+          b.  The 'domain' you classified.
+          c.  The 'sourcing_policy' text you adopted.
+          d.  The full list of 'sources' from the googleSearch.
+          (The tool's job is to check if the *retrieved* sources actually *meet* the policy).
+
+      6.  [EVALUATE]:
+          a.  IF 'is_sufficient' is true: Proceed to Step 7 (Synthesize).
+          b.  IF 'is_sufficient' is false: This is a CRITICAL FAILURE. You MUST re-run the loop. Go back to Step 3, but this time use the 'refined_queries' from the evaluator tool to perform a new, more targeted 'googleSearch'. You must retry *once*.
+
+      7.  [SYNTHESIZE]:
+          a.  Synthesize the final answer using information ONLY from the verified, high-quality sources that align with your [SOURCING POLICY].
+          b.  You must attempt to TRIANGULATE information by cross-referencing facts across multiple valid sources.
+          c.  You MUST provide detailed, inline citations for every fact you present.
+          d.  If, after one retry, sources are still insufficient, you must state what you found and why it is not sufficient to answer the query.`
       }] },
     },
   },
@@ -201,11 +272,11 @@ export const TASK_CONFIGS: Record<string, any> = {
           },
         }]
       }],
-      systemInstruction: { parts: [{ text: `You are a 'Code Agent'. Your primary goal is to solve the user's request. 
-      - For **computational or logical tasks**, you MUST call the 'code_interpreter' tool. 
-      - For **simple code generation** (e.g., boilerplate), you may output the code directly.
-      - If the user asks for a **chart or graph**, your Python code must output a JSON string on its final line, prefixed with VIZ_SPEC: . The JSON must conform to the VizSpec schema: { "type": "bar" | "line" | "pie", "data": any[], "dataKey": string, "categoryKey": string }. For example: print('VIZ_SPEC: { "type": "bar", "data": [{"name": "A", "value": 10}], "dataKey": "value", "categoryKey": "name" }')
-      - If you receive a **[Failed Code]** and **[Error Message]**, your only job is to debug the code and call code_interpreter with the corrected version.` }] },
+      systemInstruction: { parts: [{ text: `You are a 'Code Agent'. Your primary goal is to solve the user's request.
+- For **computational or logical tasks**, you MUST call the 'code_interpreter' tool.
+- For **simple code generation** (e.g., boilerplate), you may output the code directly.
+- If the user asks for a **chart or graph**, your Python code must output a JSON string on its final line, prefixed with VIZ_SPEC: . The JSON must conform to the VizSpec schema: { "type": "bar" | "line" | "pie", "data": any[], "dataKey": string, "categoryKey": string }. For example: print('VIZ_SPEC: { "type": "bar", "data": [{"name": "A", "value": 10}], "dataKey": "value", "categoryKey": "name" }')
+- If you receive a **[Failed Code]** and **[Error Message]**, your only job is to debug the code and call code_interpreter with the corrected version.` }] },
     }
   },
   [TaskType.Creative]: {
@@ -310,6 +381,19 @@ export const TASK_CONFIGS: Record<string, any> = {
         3. Your second step MUST be to use the output of 'apo_refine' to generate a final, corrected answer or action.`
       }]},
     }
+  },
+  // Definitions for Manual RAG Agents (from previous conversation)
+  [TaskType.Embedder]: {
+      model: 'gemini-2.5-flash',
+      title: 'Embedder Agent',
+      description: 'Embeds a doc into the local corpus.',
+      config: {},
+  },
+  [TaskType.ManualRAG]: {
+      model: 'gemini-2.5-flash',
+      title: 'Local RAG Agent',
+      description: 'Answers using the local corpus.',
+      config: {},
   }
 };
 

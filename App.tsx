@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Persona, ChatMode, TaskType, WorkflowState, ChatMessage } from './types';
 import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
@@ -9,6 +10,8 @@ import { Message } from './ui/components/Message';
 import { ChatInput } from './ui/components/ChatInput';
 import DebuggerModal from './components/Debugger';
 import { CommandPalette } from './ui/components/CommandPalette';
+import { agentGraphConfigs } from './ui/components/graphConfigs';
+
 
 const getInitialMode = () => (localStorage.getItem('agentic-chat-mode') as ChatMode) || ChatMode.Normal;
 
@@ -30,14 +33,18 @@ const App: React.FC = () => {
   useEffect(() => localStorage.setItem('agentic-chat-mode', mode), [mode]);
 
   useEffect(() => {
-    const activeTask = messages.find(m => m.isLoading && m.role === 'assistant');
-    if (activeTask && activeTask.taskType && activeTask.workflowState) {
+    // Find the last assistant message that has a graphable workflow.
+    const lastTaskWithMessage = [...messages]
+        .reverse()
+        .find(m => m.role === 'assistant' && m.taskType && m.workflowState && agentGraphConfigs[m.taskType]);
+    
+    if (lastTaskWithMessage) {
         setLastGraphableTask({
-            taskType: activeTask.taskType,
-            workflowState: activeTask.workflowState,
+            taskType: lastTaskWithMessage.taskType as TaskType,
+            workflowState: lastTaskWithMessage.workflowState as WorkflowState,
         });
     }
-  }, [messages, isLoading]);
+  }, [messages]);
 
   useEffect(() => {
     async function load() {
@@ -93,42 +100,42 @@ const App: React.FC = () => {
         messages={messages}
       />
       
-      <div className="flex-1 pt-36 overflow-hidden">
-        <main className="h-full grid grid-cols-12" aria-live="polite">
+      <div className="flex-1 grid grid-cols-12 overflow-hidden">
             {/* Left Column: Fixed */}
-            <div className="hidden lg:block col-span-3 h-full border-r border-border p-4">
+            <div className="hidden lg:block col-span-3 h-full border-r border-border p-4 overflow-y-auto">
                 <CommandPalette 
                   lastTask={lastGraphableTask}
                 />
             </div>
 
             {/* Right Column: Scrollable */}
-            <div className="col-span-12 lg:col-span-9 h-full overflow-y-auto p-4">
-                {messages.length === 0 && !isLoading ? (
-                    <div className="h-full flex flex-col justify-center items-center text-center text-foreground/70">
-                        <h2 className="text-2xl font-semibold mb-2 font-sans">Agentura AI</h2>
-                        <p className="text-sm">A specialized agent swarm. State your objective.</p>
-                    </div>
-                ) : (
-                    <>
-                    {messages.map((msg) => (
-                        <Message
-                            key={msg.id}
-                            message={msg}
-                            onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
-                            onDebugCode={handleDebugCode}
-                            onExecutePlan={handleExecutePlan}
-                            onRetryPlan={handleExecutePlan}
-                        />
-                    ))}
-                    <div ref={messagesEndRef} />
-                    </>
-                )}
+            <div className="col-span-12 lg:col-span-9 h-full overflow-y-auto p-4 flex flex-col">
+                <main className="flex-1">
+                    {messages.length === 0 && !isLoading ? (
+                        <div className="h-full flex flex-col justify-center items-center text-center text-foreground/70">
+                            <h2 className="text-2xl font-semibold mb-2 font-sans">Agentura AI</h2>
+                            <p className="text-sm">A specialized agent swarm. State your objective.</p>
+                        </div>
+                    ) : (
+                        <>
+                        {messages.map((msg) => (
+                            <Message
+                                key={msg.id}
+                                message={msg}
+                                onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
+                                onDebugCode={handleDebugCode}
+                                onExecutePlan={handleExecutePlan}
+                                onRetryPlan={handleExecutePlan}
+                            />
+                        ))}
+                        <div ref={messagesEndRef} />
+                        </>
+                    )}
+                </main>
             </div>
-        </main>
       </div>
       
-      <footer className="sticky bottom-0 left-0 right-0">
+      <footer className="border-t border-border">
           <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} isPyodideReady={isPyodideReady}/>
       </footer>
     </div>

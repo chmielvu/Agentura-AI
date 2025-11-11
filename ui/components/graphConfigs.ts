@@ -48,8 +48,8 @@ export const agentGraphConfigs: Record<string, { nodes: GraphNode[], edges: Grap
     [TaskType.Research]: {
         nodes: [
             { id: 1, label: 'Router', icon: 'RouterIcon' }, 
-            { id: 2, label: 'Search', icon: 'SearchIcon' },
-            { id: 3, label: 'Critique', icon: 'CritiqueIcon' },
+            { id: 2, label: 'Search/Refine', icon: 'SearchIcon' }, 
+            { id: 3, label: 'Verify Sources', icon: 'CritiqueIcon' }, 
             { id: 4, label: 'Synthesize', icon: 'BrainCircuitIcon' }
         ],
         edges: [

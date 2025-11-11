@@ -1,7 +1,7 @@
 import React from 'react';
-import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource } from '../../types';
+import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData } from '../../types';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
-import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon } from '../../components/Icons';
+import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon } from '../../components/Icons';
 
 export const Message: React.FC<{ 
     message: ChatMessage;
@@ -21,6 +21,22 @@ export const Message: React.FC<{
         </>
     );
   };
+
+  const renderRepo = (repo: RepoData) => (
+    <div className="mb-2">
+      <div className="text-xs font-semibold text-foreground/80 mb-1 flex items-center gap-2"><GitHubIcon className="w-4 h-4" /> Repository Provided:</div>
+      <a
+        href={repo.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm bg-background hover:bg-border px-3 py-2 rounded-sm transition-colors block"
+      >
+        <span className="font-mono font-bold text-accent">{repo.owner}</span>
+        <span className="font-mono text-foreground/80">/</span>
+        <span className="font-mono font-bold text-accent">{repo.repo}</span>
+      </a>
+    </div>
+  );
 
   const renderSources = (sources: GroundingSource[]) => (
     <div className="mt-3 pt-3 border-t border-border/50">
@@ -142,6 +158,7 @@ export const Message: React.FC<{
         {!isUser && message.role !== 'tool' && <div className="w-8 h-8 rounded-sm bg-accent flex-shrink-0 mt-1"></div>}
         <div className={`rounded-sm px-4 py-3 ${isUser ? 'bg-user-bubble' : 'bg-card'}`}>
           <div className="prose prose-invert prose-sm max-w-none text-foreground">
+            {message.repo && renderRepo(message.repo)}
             {message.plan ? renderPlan(message.plan)
               : message.functionCalls && message.functionCalls.length > 0 ? renderFunctionCalls(message.functionCalls)
               : message.critique ? renderCritique(message.critique)

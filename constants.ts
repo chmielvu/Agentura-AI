@@ -2,18 +2,18 @@ import { FunctionDeclaration, Type } from '@google/genai';
 import { TaskType, Persona } from './types';
 
 export const APP_TITLE = "Agentura AI";
-export const APP_VERSION = "2.5.0";
+export const APP_VERSION = "3.0.0"; // ENHANCED: Updated version
 
 // 1. ROUTER_SYSTEM_INSTRUCTION (Full Implementation)
 // This is the Metaprompt "Constitution" for the Router Agent.
-export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v2.6).
+export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v3.0).
 OBJECTIVE: Analyze the user's query *in the context of the recent chat history*. You must assess its complexity and select the single best downstream specialist agent to handle it.
 CONSTRAINTS:
 1. You MUST choose from the available routes.
 2. You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
 3. Stateless queries (e.g., "Hi") are 'Chat'.
 4. Queries requiring web access are 'Research'.
-5. Queries requiring code generation/execution are 'Code'. (Developer Mode Only)
+5. Queries requiring code generation/execution are 'Code'.
 6. Queries asking for a plan are 'Planner'. (Developer Mode Only)
 7. Queries including an image are 'Vision'.
 8. Complex, multi-step, or ambiguous goals are 'Complex'.
@@ -29,12 +29,12 @@ REFUSAL PROTOCOL:
 
 Available Routes:
 - 'Chat': For simple greetings, formatting, casual conversation, or refused queries.
-- 'Research': For factual questions that require up-to-date information or web searches.
-- 'Complex': For complex, multi-step requests, or ambiguous goals that require deep reasoning (PWC loop).
-- 'Planner': For requests that ask to create a plan, a list of steps, or a workflow.
+- 'Research': For high-quality, grounded research or data retrieval.
+- 'Complex': For complex conceptual work, deep analysis, or long-form synthesis (PWC loop).
+- 'Planner': For file modification, application structure, or deployment requests.
 - 'Vision': For any query that includes an image.
-- 'Code': For requests that require writing or executing code (PoT/PWC loop).
-- 'Creative': For requests that involve generating creative content like stories or multimodal assets.
+- 'Code': For mathematical/logical computation, PoT, or pure code generation.
+- 'Creative': For generating stories, media prompts, or creative writing.
 - 'Retry': For requests to retry a failed task, often following a critique.
 
 Based on the user's query and history, choose the most appropriate route and score its complexity.
@@ -93,18 +93,20 @@ export const TASK_CONFIGS: Record<string, any> = {
     config: {},
   },
   [TaskType.Research]: {
-    model: 'gemini-2.5-flash',
-    title: 'Research Agent',
-    description: 'Uses Google Search for up-to-date, accurate information.',
+    model: 'gemini-2.5-pro', // UPGRADED to Pro for multi-step reasoning and synthesis
+    title: 'Research Swarm Agent (CRAG)',
+    description: 'Performs high-quality, grounded research using critical evaluation.',
     config: {
       tools: [{googleSearch: {}}],
       systemInstruction: { parts: [{ text: 
-          `IDENTITY: You are a Research Agent.
-          OBJECTIVE: Use Google Search to find verifiable, high-confidence sources (e.g., official press releases, academic papers) to answer the user's query.
-          PROCEDURE:
-          1. Your first turn MUST be to call 'googleSearch' to gather information.
-          2. Your final answer MUST synthesize information *only* from the provided tool output.
-          3. You MUST cite your sources. Do not add information not present in the search results.`
+          `IDENTITY: You are a Research Swarm Controller, synthesizing the output of multiple search agents.
+          OBJECTIVE: Answer the user's query with a high-confidence, comprehensive, and cited report. Your output MUST be auditable.
+          PROCEDURE (CRAG-like Logic):
+          1. Generate multiple, diverse search queries to avoid bias.
+          2. Perform the 'googleSearch' tool call.
+          3. Critically evaluate the retrieved sources for reliability and completeness. (CRAG Step: If sources are low quality, adjust your search and try again once).
+          4. Synthesize the final answer using information ONLY from the verified sources.
+          5. You MUST provide detailed citations for every fact you present.`
       }] },
     },
   },
@@ -181,7 +183,7 @@ export const TASK_CONFIGS: Record<string, any> = {
           },
         }]
       }],
-      systemInstruction: { parts: [{ text: "You are a 'Code Agent'. Your primary goal is to solve the user's request by calling the 'code_interpreter' tool. Do not answer directly; use the tool." }] },
+      systemInstruction: { parts: [{ text: "You are a 'Code Agent'. Your primary goal is to solve the user's request. For **computational or logical tasks**, you MUST call the 'code_interpreter' tool. For **simple code generation** (e.g., boilerplate, function definitions that don't need execution), you may output the code directly." }] },
     }
   },
   [TaskType.Creative]: {
@@ -254,13 +256,11 @@ export const TASK_CONFIGS: Record<string, any> = {
         },
     },
   },
-  // 4. NEW: RETRY AGENT (for Reflexion Loop)
   [TaskType.Retry]: {
     model: 'gemini-2.5-pro',
     title: 'Self-Correction Agent',
     description: 'Agent is retrying the task based on critique.',
     config: {
-      // **FIXED**: Added the `apo_refine` tool to the agent's manifest.
       tools: [{
         functionDeclarations: [{
           name: 'apo_refine',

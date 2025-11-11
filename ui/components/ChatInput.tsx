@@ -25,7 +25,13 @@ export const ChatInput: React.FC<{
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newPrompt = e.target.value;
-      setPrompt(newPrompt);
+      const match = newPrompt.match(gitHubRepoRegex);
+      if (match && !repoUrl) {
+          setRepoUrl(match[0]);
+          setPrompt(newPrompt.replace(match[0], '').trim());
+      } else {
+          setPrompt(newPrompt);
+      }
       setShowCommandPalette(newPrompt.startsWith('/'));
   };
 
@@ -43,12 +49,20 @@ export const ChatInput: React.FC<{
     setPrompt(''); setFile(null); setRepoUrl(null);
   };
   
-  // Other handlers like handleFileChange, handleDrop, etc. remain largely the same
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
     }
   };
+
+  const handleRepoClick = () => {
+    const url = window.prompt("Enter GitHub repository URL:");
+    if (url && gitHubRepoRegex.test(url)) {
+        setRepoUrl(url);
+    } else if (url) {
+        alert("Invalid GitHub repository URL.");
+    }
+  }
 
   return (
     <div className="bg-card p-4 border-t border-border relative">
@@ -67,17 +81,27 @@ export const ChatInput: React.FC<{
             </div>
         )}
 
-        {/* Attachment/RepoUrl rendering */}
-        {file && (
-            <div className="mb-2 flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border">
-                <span className="text-sm text-foreground/80">File: <span className="font-medium text-foreground">{file.name}</span></span>
-                <button onClick={() => setFile(null)} className="text-foreground/70 hover:text-white"><XCircleIcon /></button>
-            </div>
+        {(file || repoUrl) && (
+          <div className="mb-2">
+            {file && (
+                <div className="flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border">
+                    <span className="text-sm text-foreground/80">File: <span className="font-medium text-foreground">{file.name}</span></span>
+                    <button onClick={() => setFile(null)} className="text-foreground/70 hover:text-white"><XCircleIcon /></button>
+                </div>
+            )}
+            {repoUrl && (
+                <div className="flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border mt-2">
+                    <span className="text-sm text-foreground/80 flex items-center gap-2"><GitHubIcon className="w-4 h-4" /> Repo: <span className="font-medium text-foreground">{repoUrl.replace('https://github.com/', '')}</span></span>
+                    <button onClick={() => setRepoUrl(null)} className="text-foreground/70 hover:text-white"><XCircleIcon /></button>
+                </div>
+            )}
+          </div>
         )}
 
         <div className="flex items-center bg-background rounded-sm p-2 border border-border focus-within:ring-1 focus-within:ring-accent">
             <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-foreground/70 hover:text-white"><PaperclipIcon /></button>
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+            <button onClick={handleRepoClick} aria-label="Add GitHub repository" className="p-2 text-foreground/70 hover:text-white"><GitHubIcon /></button>
             <textarea
                 value={prompt}
                 onChange={handlePromptChange}
@@ -87,7 +111,7 @@ export const ChatInput: React.FC<{
                 rows={1}
                 disabled={isLoading || !isPyodideReady}
             />
-            <button onClick={handleSubmit} aria-label="Send message" disabled={isLoading || (!prompt.trim() && !file)} className="p-2 rounded-sm transition-colors disabled:opacity-50 enabled:bg-accent enabled:hover:bg-accent/80 text-white">
+            <button onClick={handleSubmit} aria-label="Send message" disabled={isLoading || (!prompt.trim() && !file && !repoUrl)} className="p-2 rounded-sm transition-colors disabled:opacity-50 enabled:bg-accent enabled:hover:bg-accent/80 text-white">
                 <SendIcon />
             </button>
         </div>

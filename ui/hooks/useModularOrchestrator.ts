@@ -1,10 +1,9 @@
 /**
- * Agentura AI (v2.6) - Modular Orchestrator Hook (useReducer Refactor)
+ * Agentura AI (v3.0) - Modular Orchestrator Hook (High-Intelligence Normal Mode)
  *
- * This hook is the core of the v2.5 refactor. It isolates all complex
- * agentic orchestration logic from the UI, providing a clean API to the 
- * main App component. It manages state, PWC loops, tool calls, and retries
- * through a centralized reducer for robust and persistent state management.
+ * This version modifies the routing logic to allow all non-destructive agentic
+ * capabilities (Code, Complex, Creative, Research) in Normal Mode, while strictly
+ * blocking only the Planner (app modification/deployment logic).
  */
 import React, { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
@@ -114,6 +113,21 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
     }
 };
 
+// ENHANCEMENT: Create a pure function for parsing error messages
+const parseApiErrorMessage = (e: any): string => {
+    if (e?.message) {
+        if (e.message.includes('401') || e.message.includes('403') || e.message.includes('API key not valid')) {
+            return "Authentication Error. Please ensure your API Key is valid.";
+        } else if (e.message.includes('429')) {
+            return "API quota exceeded. Please wait and try again later.";
+        } else if (e.message.includes('SAFETY')) {
+            return "The response was blocked by the safety filter due to potential policy violations.";
+        } else {
+            return `Error: ${e.message}`;
+        }
+    }
+    return "An unknown error occurred.";
+};
 
 export const useModularOrchestrator = (
     persona: Persona,
@@ -151,6 +165,14 @@ export const useModularOrchestrator = (
         dispatch({ type: 'UPDATE_WORKFLOW_STATE', payload: { messageId, nodeId, state: update } });
     }, [dispatch]);
 
+    // ENHANCEMENT: Use the new parseApiErrorMessage function
+    const handleApiError = useCallback((e: any, assistantMessageId: string, manageLoadingState: boolean) => {
+        const errorMessage = parseApiErrorMessage(e);
+        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, content: errorMessage } } });
+        if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
+        throw e; // Re-throw for plan execution to catch
+    }, [dispatch]);
+
     const runPythonCode = async (code: string): Promise<string> => {
         if (!pyodideRef.current) return "Error: Pyodide is not initialized.";
         try {
@@ -185,6 +207,7 @@ export const useModularOrchestrator = (
             const criticConfig = TASK_CONFIGS[TaskType.Critique];
             let critique: CritiqueResult | null = null;
             try {
+                // NOTE: Using a fixed model 'gemini-2.5-flash' for the critic for cost/speed efficiency
                 const resp = await ai.models.generateContent({ model: criticConfig.model, contents: { parts: [{ text: `Query: ${originalUserQuery}\nOutput: ${v1Output}` }] }, config: criticConfig.config });
                 critique = JSON.parse(resp.text) as CritiqueResult;
                 updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: critique });
@@ -204,6 +227,7 @@ export const useModularOrchestrator = (
                 dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: retryAssistantMsg }});
 
                 const retryPrompt = `Critique: ${critique.critique}. Retry query: ${originalUserQuery}`;
+                // NOTE: Use the current model's chat history for the retry agent communication
                 const stream = await chat.sendMessageStream({ message: [{ text: retryPrompt }] });
                 await processStream(stream, retryMsgId);
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: retryMsgId, update: { isLoading: false } } });
@@ -213,7 +237,8 @@ export const useModularOrchestrator = (
             }
         };
 
-        if (routedTask === TaskType.Complex) {
+        // ENHANCEMENT: Route Research to the PWC loop to enable the CRAG workflow
+        if (routedTask === TaskType.Complex || routedTask === TaskType.Research) {
             await executeComplexPwcLoop(fullText);
         } else if (functionCalls && functionCalls.length > 0) {
             if (functionCalls.some(fc => fc.name === 'code_interpreter')) {
@@ -248,6 +273,16 @@ export const useModularOrchestrator = (
         
         if (manageLoadingState) {
             const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
+            if (repoUrl) {
+                const match = repoUrl.match(/https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/);
+                if (match) {
+                    userMsg.repo = {
+                        url: repoUrl,
+                        owner: match[1],
+                        repo: match[2],
+                    };
+                }
+            }
             dispatch({ type: 'SEND_MESSAGE_START', payload: { userMessage: userMsg } });
         }
         
@@ -262,7 +297,7 @@ export const useModularOrchestrator = (
                 const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
                 dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
 
-                // ADAPTIVE ROUTING: Use gemini-2.5-flash for speed/cost
+                // ADAPTIVE ROUTING: Use gemini-2.5-flash for speed/cost (Lite Tier proxy)
                 const routerHistory = fullHistory.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
                 const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
                 routedTask = routerResp.functionCalls?.[0]?.args.route as TaskType || TaskType.Chat;
@@ -273,16 +308,17 @@ export const useModularOrchestrator = (
 
             if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
             
-            // CRITICAL ARCHITECTURAL HOOK: Block Code/Planner tasks for app modification in Normal Mode
+            // CRITICAL ARCHITECTURAL HOOK: Block destructive tasks in Normal Mode
             if (mode === ChatMode.Normal) {
-                // If the user attempts to run a Code or Planner task in Normal Mode, force it to Chat.
-                if (routedTask === TaskType.Code || routedTask === TaskType.Planner) {
-                    routedTask = TaskType.Chat;
+                // Only TaskType.Planner is considered destructive (multi-step app logic/editing).
+                if (routedTask === TaskType.Planner) {
+                    routedTask = TaskType.Chat; // Downgrade destructive task
 
-                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: `**Mode Constraint:** Task routed to *Chat* mode. To perform code generation, planning, or app file modification, please switch to **Developer** mode in the header.`, isLoading: false } } });
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: `**Mode Constraint:** Task routed to *Chat* mode. Planning and application file modification (vibe coding) are disabled. To use these features, switch to **Developer** mode in the header.`, isLoading: false } } });
                     if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
                     return; // EXIT EXECUTION
                 }
+                // NOTE: TaskType.Code is now allowed to pass, as its action is non-destructive sandboxed execution (PoT).
             }
 
 
@@ -311,23 +347,9 @@ export const useModularOrchestrator = (
             await handleStreamEnd(chat, assistantMsgId, routedTask, prompt, streamOutput, manageLoadingState);
 
         } catch(e: any) {
-            let errorMessage = "An unknown error occurred.";
-            if (e?.message) {
-                 if (e.message.includes('401') || e.message.includes('403') || e.message.includes('API key not valid')) {
-                    errorMessage = "Authentication Error. Please ensure your API Key is valid.";
-                } else if (e.message.includes('429')) {
-                    errorMessage = "API quota exceeded. Please wait and try again later.";
-                } else if (e.message.includes('SAFETY')) {
-                    errorMessage = "The response was blocked by the safety filter due to potential policy violations.";
-                } else {
-                    errorMessage = `Error: ${e.message}`;
-                }
-            }
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, content: errorMessage } } });
-            if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
-            throw e; // Re-throw for plan execution to catch
+            handleApiError(e, assistantMsgId, manageLoadingState);
         }
-    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode]); // ADD mode to dependencies
+    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode, handleApiError]); // ADD handleApiError to dependencies
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         const msg = state.messages.find(m => m.id === messageId);
@@ -350,25 +372,34 @@ export const useModularOrchestrator = (
     const handleExecutePlan = useCallback(async (plan: Plan) => {
         dispatch({ type: 'SET_LOADING', payload: true });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: plan.id } });
-
-        const executionPromises = plan.plan
-            .sort((a, b) => a.step_id - b.step_id)
-            .map(async (step) => {
-                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress' } });
-                try {
-                    await handleSendMessage(step.description, undefined, undefined, step.tool_to_use as TaskType, true, false);
-                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: 'Step executed successfully.' } });
-                } catch (e: any) {
-                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'failed', result: e.message || 'Step failed to execute.' } });
-                    console.error(`Plan step ${step.step_id} failed:`, e);
-                }
-            });
-
-        await Promise.all(executionPromises);
-
+    
+        // **FURTHER ENHANCEMENT: Smart Retry Logic**
+        // Filter to find only the steps that need to be run (pending or failed).
+        const stepsToExecute = plan.plan
+            .filter(step => step.status === 'pending' || step.status === 'failed')
+            .sort((a, b) => a.step_id - b.step_id);
+    
+        for (const step of stepsToExecute) {
+            dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress' } });
+            try {
+                // Execute the step. This function will throw on API error.
+                await handleSendMessage(step.description, undefined, undefined, step.tool_to_use as TaskType, true, false);
+                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: 'Step executed successfully.' } });
+            } catch (e: any) {
+                // ENHANCEMENT: Use the new parseApiErrorMessage function for consistent error reporting in plans
+                const errorMessage = parseApiErrorMessage(e);
+                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'failed', result: errorMessage } });
+                console.error(`Plan step ${step.step_id} failed:`, e);
+                
+                // **CRITICAL:** Stop plan execution on the first failure.
+                // This prevents subsequent steps from running without their dependencies.
+                break; 
+            }
+        }
+    
         dispatch({ type: 'SET_LOADING', payload: false });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined, currentPlanStepId: undefined } });
-
+    
     }, [handleSendMessage, dispatch]);
 
     const setMessages = useCallback((messages: ChatMessage[]) => {

@@ -4,7 +4,6 @@ import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
 import { ChatInput } from './ui/components/ChatInput';
-import { HUD } from './ui/components/HUD';
 import DebuggerModal from './components/Debugger';
 
 const getInitialMode = () => (localStorage.getItem('agentic-chat-mode') as ChatMode) || ChatMode.Normal;
@@ -68,10 +67,17 @@ const App: React.FC = () => {
       {debugSession && (
         <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
       )}
-      <Header persona={persona} onPersonaChange={handlePersonaChange} mode={mode} onModeChange={handleModeChange} />
-      <HUD isLoading={isLoading} isPyodideReady={isPyodideReady} messages={messages} />
+      <Header
+        persona={persona}
+        onPersonaChange={handlePersonaChange}
+        mode={mode}
+        onModeChange={handleModeChange}
+        isLoading={isLoading}
+        isPyodideReady={isPyodideReady}
+        messages={messages}
+      />
       
-      <main className="flex-1 overflow-y-auto pt-40 pb-4" aria-live="polite">
+      <main className="flex-1 overflow-y-auto pt-48 pb-4" aria-live="polite">
         <div className="max-w-4xl mx-auto px-4">
           {messages.length === 0 && !isLoading ? (
             <div className="text-center text-foreground/70 mt-8">

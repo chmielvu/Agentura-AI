@@ -1,10 +1,14 @@
+
+
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Persona, ChatMode } from './types';
+import { Persona, ChatMode, TaskType, WorkflowState, ChatMessage } from './types';
 import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
 import { ChatInput } from './ui/components/ChatInput';
 import DebuggerModal from './components/Debugger';
+import { CommandPalette } from './ui/components/CommandPalette';
 
 const getInitialMode = () => (localStorage.getItem('agentic-chat-mode') as ChatMode) || ChatMode.Normal;
 
@@ -18,10 +22,22 @@ const App: React.FC = () => {
   const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, mode, pyodideRef);
   const { messages, isLoading } = state;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const [lastGraphableTask, setLastGraphableTask] = useState<{ taskType: TaskType; workflowState: WorkflowState } | null>(null);
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
   useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
   useEffect(() => localStorage.setItem('agentic-chat-mode', mode), [mode]);
+
+  useEffect(() => {
+    const activeTask = messages.find(m => m.isLoading && m.role === 'assistant');
+    if (activeTask && activeTask.taskType && activeTask.workflowState) {
+        setLastGraphableTask({
+            taskType: activeTask.taskType,
+            workflowState: activeTask.workflowState,
+        });
+    }
+  }, [messages, isLoading]);
 
   useEffect(() => {
     async function load() {
@@ -77,30 +93,40 @@ const App: React.FC = () => {
         messages={messages}
       />
       
-      <main className="flex-1 overflow-y-auto pt-48 pb-4" aria-live="polite">
-        <div className="max-w-4xl mx-auto px-4">
-          {messages.length === 0 && !isLoading ? (
-            <div className="text-center text-foreground/70 mt-8">
-              <h2 className="text-2xl font-semibold mb-2 font-sans">Agentura AI</h2>
-              <p className="text-sm">A specialized agent swarm. State your objective.</p>
-            </div>
-          ) : (
-            <>
-              {messages.map((msg) => (
-                <Message
-                    key={msg.id}
-                    message={msg}
-                    onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
-                    onDebugCode={handleDebugCode}
-                    onExecutePlan={handleExecutePlan}
-                    onRetryPlan={handleExecutePlan}
+      <div className="flex-1 pt-36 overflow-hidden">
+        <main className="h-full grid grid-cols-12" aria-live="polite">
+            {/* Left Column: Fixed */}
+            <div className="hidden lg:block col-span-3 h-full border-r border-border p-4">
+                <CommandPalette 
+                  lastTask={lastGraphableTask}
                 />
-              ))}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
-      </main>
+            </div>
+
+            {/* Right Column: Scrollable */}
+            <div className="col-span-12 lg:col-span-9 h-full overflow-y-auto p-4">
+                {messages.length === 0 && !isLoading ? (
+                    <div className="h-full flex flex-col justify-center items-center text-center text-foreground/70">
+                        <h2 className="text-2xl font-semibold mb-2 font-sans">Agentura AI</h2>
+                        <p className="text-sm">A specialized agent swarm. State your objective.</p>
+                    </div>
+                ) : (
+                    <>
+                    {messages.map((msg) => (
+                        <Message
+                            key={msg.id}
+                            message={msg}
+                            onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
+                            onDebugCode={handleDebugCode}
+                            onExecutePlan={handleExecutePlan}
+                            onRetryPlan={handleExecutePlan}
+                        />
+                    ))}
+                    <div ref={messagesEndRef} />
+                    </>
+                )}
+            </div>
+        </main>
+      </div>
       
       <footer className="sticky bottom-0 left-0 right-0">
           <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} isPyodideReady={isPyodideReady}/>

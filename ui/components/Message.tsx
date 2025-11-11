@@ -1,6 +1,5 @@
 import React from 'react';
 import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData } from '../../types';
-import { AgentGraphVisualizer } from './AgentGraphVisualizer';
 import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon } from '../../components/Icons';
 import { Visualization } from './Visualization';
 
@@ -111,6 +110,14 @@ export const Message: React.FC<{
                     <div className="mt-2 text-xs space-y-1 text-foreground/70">
                         <p>Tool: <span className="font-medium text-foreground/80">{step.tool_to_use}</span></p>
                     </div>
+                    {step.result && (
+                        <div className="mt-2 pt-2 border-t border-border/50">
+                            <p className="text-xs text-foreground/60 mb-1">Result:</p>
+                            <pre className="text-xs whitespace-pre-wrap font-mono bg-background p-2 rounded-sm max-h-40 overflow-y-auto">
+                                <code>{step.result}{step.status === 'in-progress' && <span className="animate-pulse">|</span>}</code>
+                            </pre>
+                        </div>
+                    )}
                 </div>
             ))}
         </div>
@@ -155,7 +162,7 @@ export const Message: React.FC<{
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`max-w-xl px-1 ${!isUser && 'flex items-start space-x-3'}`}>
+      <div className={`max-w-full px-1 ${!isUser && 'flex items-start space-x-3'}`}>
         {!isUser && message.role !== 'tool' && <div className="w-8 h-8 rounded-sm bg-accent flex-shrink-0 mt-1"></div>}
         <div className={`rounded-sm px-4 py-3 ${isUser ? 'bg-user-bubble' : 'bg-card'}`}>
           <div className="prose prose-invert prose-sm max-w-none text-foreground">
@@ -167,7 +174,7 @@ export const Message: React.FC<{
               : renderContent(message.content)}
             {message.vizSpec && <Visualization spec={message.vizSpec} />}
           </div>
-          {message.isLoading && message.taskType && message.workflowState && <AgentGraphVisualizer taskType={message.taskType} workflowState={message.workflowState} />}
+          
           {message.sources && message.sources.length > 0 && renderSources(message.sources)}
         </div>
       </div>

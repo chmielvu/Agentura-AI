@@ -97,7 +97,7 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
                         const newPlan = {
                             ...msg.plan,
                             plan: msg.plan.plan.map(step =>
-                                step.step_id === stepId ? { ...step, status, result } : step
+                                step.step_id === stepId ? { ...step, status, ...(result !== undefined && { result }) } : step
                             )
                         };
                         return { ...msg, plan: newPlan };
@@ -185,7 +185,7 @@ export const useModularOrchestrator = (
         }
     };
 
-    const processStream = useCallback(async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string) => {
+    const processStream = useCallback(async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string, onStreamUpdate?: (streamedText: string) => void) => {
         let fullText = '', sources: GroundingSource[] = [], functionCalls: FunctionCall[] = [];
         for await (const chunk of stream) {
           if (chunk.text) fullText += chunk.text;
@@ -193,6 +193,7 @@ export const useModularOrchestrator = (
           const newSources = extractSources(chunk);
           sources = Array.from(new Map([...sources, ...newSources].map(s => [s.uri, s])).values());
           dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { content: fullText, sources, functionCalls } } });
+          if (onStreamUpdate) onStreamUpdate(fullText);
         }
         return { fullText, sources, functionCalls };
     }, [dispatch]);
@@ -217,7 +218,7 @@ export const useModularOrchestrator = (
         
     }, [ai, state.messages, updateWorkflowState, processStream, dispatch]);
     
-    const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true): Promise<ChatMessage> => {
+    const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true, onStreamUpdate?: (streamedText: string) => void): Promise<ChatMessage> => {
         return new Promise(async (resolve, reject) => {
             if (state.isLoading && manageLoadingState) {
                 // Find and return a placeholder/dummy message or reject
@@ -287,7 +288,7 @@ export const useModularOrchestrator = (
                 const parts: Part[] = [{ text: prompt }];
                 if (file) parts.push(fileToGenerativePart(file));
                 const stream = await chat.sendMessageStream({ message: parts });
-                const streamOutput = await processStream(stream, assistantMsgId);
+                const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
                 // This is a new wrapper function around handleStreamEnd
                 const finalizeTurn = async () => {
@@ -486,7 +487,11 @@ ${codeToRun}
             }
             
             try {
-                const resultMessage = await handleSendMessage(stepDescription, undefined, undefined, step.tool_to_use as TaskType, true, false);
+                const onStreamUpdate = (streamedText: string) => {
+                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: streamedText } });
+                };
+
+                const resultMessage = await handleSendMessage(stepDescription, undefined, undefined, step.tool_to_use as TaskType, true, false, onStreamUpdate);
                 
                 let outputData = resultMessage.content;
                 if (resultMessage.functionResponse) outputData = JSON.stringify(resultMessage.functionResponse.response);

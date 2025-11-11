@@ -106,7 +106,8 @@ export const TASK_CONFIGS: Record<string, any> = {
           2. Perform the 'googleSearch' tool call.
           3. Critically evaluate the retrieved sources for reliability and completeness. (CRAG Step: If sources are low quality, adjust your search and try again once).
           4. Synthesize the final answer using information ONLY from the verified sources.
-          5. You MUST provide detailed citations for every fact you present.`
+          5. You MUST provide detailed citations for every fact you present.
+          6. If your v1 output receives a critique about poor sources, your v2 answer MUST begin with a new 'googleSearch' call to find better sources.`
       }] },
     },
   },
@@ -142,13 +143,15 @@ export const TASK_CONFIGS: Record<string, any> = {
               type: Type.OBJECT,
               properties: {
                 step_id: { type: Type.NUMBER, description: "The step number." },
-                description: { type: Type.STRING, description: "A description of the action to be taken in this step." },
+                description: { type: Type.STRING, description: "A description of the action to be taken in this step. Can use curly braces like {var} to reference outputs from previous steps." },
                 tool_to_use: { 
                     type: Type.STRING, 
                     description: "The 'TaskType' of the agent that should execute this step.",
                     enum: [TaskType.Code, TaskType.Research, TaskType.Creative, TaskType.Chat, 'none'],
                 },
                 acceptance_criteria: { type: Type.STRING, description: "The criteria to verify this step is completed successfully." },
+                inputs: { type: Type.ARRAY, description: "A list of 'output_key' values from previous steps that this step depends on.", items: { type: Type.STRING } },
+                output_key: { type: Type.STRING, description: "A unique variable name to store the output of this step for later steps to use." },
               },
               required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
             },
@@ -156,7 +159,7 @@ export const TASK_CONFIGS: Record<string, any> = {
         },
         required: ['plan'],
       },
-      systemInstruction: { parts: [{ text: "You are a 'Planner' agent. Decompose the user's goal into a JSON plan. You must select the correct 'tool_to_use' (TaskType) for each step." }] },
+      systemInstruction: { parts: [{ text: "You are a 'Planner' agent. Decompose the user's goal into a JSON plan. Your plan steps can now pass data. If a step's description needs data from a previous step, use curly braces (e.g., {myResult}). Then, list the keys in the 'inputs' array (e.g., ['myResult']). If a step produces data, give it a unique 'output_key'. If the user's goal is to fix a failed plan, analyze the [Failed Step] and [Error Message] and generate a new, complete plan that either fixes the step or provides an alternative path." }] },
     },
   },
   [TaskType.Vision]: {
@@ -183,7 +186,11 @@ export const TASK_CONFIGS: Record<string, any> = {
           },
         }]
       }],
-      systemInstruction: { parts: [{ text: "You are a 'Code Agent'. Your primary goal is to solve the user's request. For **computational or logical tasks**, you MUST call the 'code_interpreter' tool. For **simple code generation** (e.g., boilerplate, function definitions that don't need execution), you may output the code directly." }] },
+      systemInstruction: { parts: [{ text: `You are a 'Code Agent'. Your primary goal is to solve the user's request. 
+      - For **computational or logical tasks**, you MUST call the 'code_interpreter' tool. 
+      - For **simple code generation** (e.g., boilerplate), you may output the code directly.
+      - If the user asks for a **chart or graph**, your Python code must output a JSON string on its final line, prefixed with VIZ_SPEC: . The JSON must conform to the VizSpec schema: { "type": "bar" | "line" | "pie", "data": any[], "dataKey": string, "categoryKey": string }. For example: print('VIZ_SPEC: { "type": "bar", "data": [{"name": "A", "value": 10}], "dataKey": "value", "categoryKey": "name" }')
+      - If you receive a **[Failed Code]** and **[Error Message]**, your only job is to debug the code and call code_interpreter with the corrected version.` }] },
     }
   },
   [TaskType.Creative]: {
@@ -234,7 +241,10 @@ export const TASK_CONFIGS: Record<string, any> = {
         systemInstruction: { parts: [{ text: 
             `IDENTITY: You are a 'Critic' agent. You are a harsh but fair evaluator.
             OBJECTIVE: Evaluate a model's output against the original user query.
-            PROCEDURE: You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). Provide a detailed, actionable critique and suggested revisions.
+            PROCEDURE: 
+            1. You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). 
+            2. If the original task was 'Research', you MUST also evaluate the provided sources for relevance and quality. If they are poor, mention it explicitly in the critique.
+            3. Provide a detailed, actionable critique and suggested revisions.
             REFUSAL: Do not answer the user's query. Only provide the critique.`
         }] },
         responseSchema: {

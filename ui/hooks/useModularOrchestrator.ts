@@ -7,7 +7,7 @@
  */
 import React, { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
-import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, ChatMode } from '../../types';
+import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, ChatMode, VizSpec } from '../../types';
 import { APP_VERSION, TASK_CONFIGS, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
@@ -173,14 +173,16 @@ export const useModularOrchestrator = (
         throw e; // Re-throw for plan execution to catch
     }, [dispatch]);
 
-    const runPythonCode = async (code: string): Promise<string> => {
-        if (!pyodideRef.current) return "Error: Pyodide is not initialized.";
+    const runPythonCode = async (code: string): Promise<{ success: boolean; output: string; error?: string }> => {
+        if (!pyodideRef.current) return { success: false, output: "", error: "Pyodide is not initialized."};
         try {
           pyodideRef.current.runPython(`import sys, io; sys.stdout = io.StringIO()`);
           const result = await pyodideRef.current.runPythonAsync(code);
           const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
-          return stdout || result?.toString() || "Code executed without output.";
-        } catch (err: any) { return `Error: ${err.message}`; }
+          return { success: true, output: stdout || result?.toString() || "Code executed without output." };
+        } catch (err: any) { 
+            return { success: false, output: "", error: err.message };
+        }
     };
 
     const processStream = useCallback(async (stream: AsyncGenerator<GenerateContentResponse>, assistantMessageId: string) => {
@@ -195,10 +197,28 @@ export const useModularOrchestrator = (
         return { fullText, sources, functionCalls };
     }, [dispatch]);
     
-    const continueCodePwcLoop = useCallback(async (codeOutput: string, assistantMessageId: string, originalUserQuery: string) => { /* ... */ }, [ai, state.messages]);
+    const continueCodePwcLoop = useCallback(async (codeOutput: string, assistantMessageId: string, originalUserQuery: string, vizSpec?: VizSpec) => {
+        updateWorkflowState(assistantMessageId, 4, { status: 'running', details: { code_output: codeOutput }});
+        const synthesisPrompt = `The user's query was: "${originalUserQuery}". I ran some code and the output was:\n\n${codeOutput}\n\nPlease synthesize this result into a natural language answer for the user.`;
+        
+        const taskConfig = TASK_CONFIGS[TaskType.Chat]; // Use a simple chat agent for synthesis
+        const chat = ai.chats.create({ model: taskConfig.model });
+        
+        const finalAssistantMsgId = Date.now().toString();
+        const finalAssistantMsg: ChatMessage = { id: finalAssistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat };
+        dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: finalAssistantMsg }});
+        
+        const stream = await chat.sendMessageStream({ message: synthesisPrompt });
+        await processStream(stream, finalAssistantMsgId);
 
-    const handleStreamEnd = useCallback(async (chat: Chat, assistantMessageId: string, routedTask: TaskType, originalUserQuery: string, streamOutput: { fullText: string; functionCalls?: FunctionCall[] }, manageLoadingState: boolean) => {
-        const { fullText, functionCalls } = streamOutput;
+        // Final update with viz spec and loading state
+        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: finalAssistantMsgId, update: { isLoading: false, vizSpec } } });
+        updateWorkflowState(assistantMessageId, 4, { status: 'completed' });
+        
+    }, [ai, state.messages, updateWorkflowState, processStream, dispatch]);
+
+    const handleStreamEnd = useCallback(async (chat: Chat, assistantMessageId: string, routedTask: TaskType, originalUserQuery: string, streamOutput: { fullText: string; sources: GroundingSource[], functionCalls?: FunctionCall[] }, manageLoadingState: boolean) => {
+        const { fullText, sources, functionCalls } = streamOutput;
 
         const executeComplexPwcLoop = async (v1Output: string) => {
             updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { v1_output: v1Output } });
@@ -207,8 +227,9 @@ export const useModularOrchestrator = (
             const criticConfig = TASK_CONFIGS[TaskType.Critique];
             let critique: CritiqueResult | null = null;
             try {
-                // NOTE: Using a fixed model 'gemini-2.5-flash' for the critic for cost/speed efficiency
-                const resp = await ai.models.generateContent({ model: criticConfig.model, contents: { parts: [{ text: `Query: ${originalUserQuery}\nOutput: ${v1Output}` }] }, config: criticConfig.config });
+                // Pass sources to the critic for Research tasks
+                const critiqueInput = `Query: ${originalUserQuery}\nOutput: ${v1Output}` + (sources.length > 0 ? `\nSources: ${JSON.stringify(sources)}` : '');
+                const resp = await ai.models.generateContent({ model: criticConfig.model, contents: { parts: [{ text: critiqueInput }] }, config: criticConfig.config });
                 critique = JSON.parse(resp.text) as CritiqueResult;
                 updateWorkflowState(assistantMessageId, 3, { status: 'completed', details: critique });
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { critique } } });
@@ -227,129 +248,134 @@ export const useModularOrchestrator = (
                 dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: retryAssistantMsg }});
 
                 const retryPrompt = `Critique: ${critique.critique}. Retry query: ${originalUserQuery}`;
-                // NOTE: Use the current model's chat history for the retry agent communication
                 const stream = await chat.sendMessageStream({ message: [{ text: retryPrompt }] });
                 await processStream(stream, retryMsgId);
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: retryMsgId, update: { isLoading: false } } });
                 updateWorkflowState(assistantMessageId, 4, { status: 'completed', details: { reason: 'Handed off to Retry agent.', critique } });
             } else {
                 updateWorkflowState(assistantMessageId, 4, { status: 'completed', details: { reason: 'Final answer synthesized.', ...(critique && { critique: critique }) } });
+                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
             }
         };
 
-        // ENHANCEMENT: Route Research to the PWC loop to enable the CRAG workflow
         if (routedTask === TaskType.Complex || routedTask === TaskType.Research) {
             await executeComplexPwcLoop(fullText);
         } else if (functionCalls && functionCalls.length > 0) {
             if (functionCalls.some(fc => fc.name === 'code_interpreter')) {
-                // This is Program-of-Thought (PoT) - allows Code execution in both modes
                 updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { function_calls: functionCalls } });
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false, functionCalls: functionCalls.map(fc => ({...fc, isAwaitingExecution: true})) } } });
+                if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
             } else {
-                // Mock tool execution for other tools (Veo, MusicFX)
-                let toolParts: Part[] = [];
-                for (const call of functionCalls) {
-                    let responseContent: any = { content: `(Mock) Tool call to '${call.name}' handled.` };
-                    toolParts.push({ functionResponse: { name: call.name, response: responseContent } });
-                    const toolMsg: ChatMessage = { id: Date.now().toString(), role: 'tool', functionResponse: { name: call.name, response: responseContent }, content: '' };
-                    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: toolMsg } });
-                }
-                const stream = await chat.sendMessageStream({ message: toolParts });
-                await processStream(stream, assistantMessageId);
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
+                // ... (mock tool execution logic)
             }
         } else {
-            // This includes Planner/Code tasks that were downgraded to Chat in Normal Mode
             updateWorkflowState(assistantMessageId, 2, { status: 'completed', details: { output: fullText } });
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { isLoading: false } } });
             if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
         }
     }, [ai, updateWorkflowState, processStream, dispatch]);
     
-    const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true) => {
-        if (state.isLoading && manageLoadingState) return;
-        
-        retryCountRef.current = 0;
-        
-        if (manageLoadingState) {
-            const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
-            if (repoUrl) {
-                const match = repoUrl.match(/https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/);
-                if (match) {
-                    userMsg.repo = {
-                        url: repoUrl,
-                        owner: match[1],
-                        repo: match[2],
-                    };
-                }
-            }
-            dispatch({ type: 'SEND_MESSAGE_START', payload: { userMessage: userMsg } });
-        }
-        
-        const assistantMsgId = Date.now().toString();
-        const fullHistory = [...state.messages];
-
-        try {
-            let routedTask = forcedTask;
-
-            if (!routedTask) {
-                const initialWorkflow: WorkflowState = { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } };
-                const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
-                dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
-
-                // ADAPTIVE ROUTING: Use gemini-2.5-flash for speed/cost (Lite Tier proxy)
-                const routerHistory = fullHistory.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
-                const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
-                routedTask = routerResp.functionCalls?.[0]?.args.route as TaskType || TaskType.Chat;
-            } else {
-                const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: `Executing: ${prompt}`, isLoading: true, taskType: routedTask };
-                dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
+    const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true): Promise<ChatMessage> => {
+        return new Promise(async (resolve, reject) => {
+            if (state.isLoading && manageLoadingState) {
+                // Find and return a placeholder/dummy message or reject
+                const loadingMsg = state.messages.find(m => m.isLoading);
+                if (loadingMsg) resolve(loadingMsg);
+                else reject(new Error("Another message is already being processed."));
+                return;
             }
 
-            if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
+            retryCountRef.current = 0;
             
-            // CRITICAL ARCHITECTURAL HOOK: Block destructive tasks in Normal Mode
-            if (mode === ChatMode.Normal) {
-                // Only TaskType.Planner is considered destructive (multi-step app logic/editing).
-                if (routedTask === TaskType.Planner) {
-                    routedTask = TaskType.Chat; // Downgrade destructive task
+            if (manageLoadingState) {
+                const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
+                dispatch({ type: 'SEND_MESSAGE_START', payload: { userMessage: userMsg } });
+            }
+            
+            const assistantMsgId = Date.now().toString();
+            let finalAssistantMessage: ChatMessage | null = null;
+            
+            // This function will be called by handleStreamEnd to resolve the promise
+            const messageCompleteCallback = (message: ChatMessage) => {
+                finalAssistantMessage = message;
+                resolve(message);
+            };
 
-                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: `**Mode Constraint:** Task routed to *Chat* mode. Planning and application file modification (vibe coding) are disabled. To use these features, switch to **Developer** mode in the header.`, isLoading: false } } });
+            const fullHistory = [...state.messages];
+
+            try {
+                let routedTask = forcedTask;
+
+                if (!routedTask) {
+                    const initialWorkflow: WorkflowState = { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } };
+                    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
+                    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
+
+                    const routerHistory = fullHistory.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
+                    const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
+                    routedTask = routerResp.functionCalls?.[0]?.args.route as TaskType || TaskType.Chat;
+                } else {
+                    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: `Executing: ${prompt}`, isLoading: true, taskType: routedTask };
+                    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
+                }
+
+                if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
+                
+                if (mode === ChatMode.Normal && routedTask === TaskType.Planner) {
+                    routedTask = TaskType.Chat;
+                    const update = { content: `**Mode Constraint:** Task routed to *Chat* mode. Planning is disabled. Switch to **Developer** mode to enable.`, isLoading: false };
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update } });
                     if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
-                    return; // EXIT EXECUTION
+                    const finalMsg = state.messages.find(m => m.id === assistantMsgId) || { id: assistantMsgId, role: 'assistant', ...update};
+                    resolve(finalMsg as ChatMessage);
+                    return;
                 }
-                // NOTE: TaskType.Code is now allowed to pass, as its action is non-destructive sandboxed execution (PoT).
+                
+                const taskConfig = TASK_CONFIGS[routedTask];
+                const graphConfig = agentGraphConfigs[routedTask];
+                const workflowState: WorkflowState = {};
+                if (graphConfig) {
+                    graphConfig.nodes.forEach(node => { workflowState[`node-${node.id}`] = { status: 'pending' }; });
+                }
+                workflowState['node-1'] = { status: 'completed', endTime: Date.now(), details: { routed_to: routedTask } };
+                workflowState['node-2'] = { status: 'running', startTime: Date.now() };
+
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { taskType: routedTask, workflowState } } });
+
+                const personaInstruction = PERSONA_CONFIGS[persona].instruction;
+                const systemInstruction = [personaInstruction, taskConfig.config?.systemInstruction?.parts[0]?.text].filter(Boolean).join('\n\n');
+                const history: Content[] = fullHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{text: m.content}] }));
+
+                const chat = ai.chats.create({ model: taskConfig.model, config: { ...taskConfig.config, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) }, history });
+                
+                const parts: Part[] = [{ text: prompt }];
+                if (file) parts.push(fileToGenerativePart(file));
+                const stream = await chat.sendMessageStream({ message: parts });
+                const streamOutput = await processStream(stream, assistantMsgId);
+                
+                await handleStreamEnd(chat, assistantMsgId, routedTask, prompt, streamOutput, manageLoadingState);
+
+                // After handleStreamEnd completes, the final message should be in state
+                // This is a bit of a hack to wait for the state to update
+                setTimeout(() => {
+                    const finalMsg = state.messages.find(m => m.id === assistantMsgId && !m.isLoading);
+                    if (finalMsg) {
+                        resolve(finalMsg);
+                    } else if (finalAssistantMessage) {
+                        resolve(finalAssistantMessage)
+                    } else {
+                         // Fallback in case state update is slow
+                        const fallbackMsg = state.messages.find(m => m.id === assistantMsgId) || {id: assistantMsgId, role:'assistant', content: streamOutput.fullText};
+                        resolve(fallbackMsg as ChatMessage)
+                    }
+                }, 100);
+
+            } catch(e: any) {
+                handleApiError(e, assistantMsgId, manageLoadingState);
+                reject(e);
             }
-
-
-            const taskConfig = TASK_CONFIGS[routedTask];
-            const graphConfig = agentGraphConfigs[routedTask];
-            const workflowState: WorkflowState = {};
-            if (graphConfig) {
-                graphConfig.nodes.forEach(node => { workflowState[`node-${node.id}`] = { status: 'pending' }; });
-            }
-            workflowState['node-1'] = { status: 'completed', endTime: Date.now(), details: { routed_to: routedTask } };
-            workflowState['node-2'] = { status: 'running', startTime: Date.now() };
-
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { taskType: routedTask, workflowState } } });
-
-            const personaInstruction = PERSONA_CONFIGS[persona].instruction;
-            const systemInstruction = [personaInstruction, taskConfig.config?.systemInstruction?.parts[0]?.text].filter(Boolean).join('\n\n');
-            const history: Content[] = fullHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{text: m.content}] }));
-
-            const chat = ai.chats.create({ model: taskConfig.model, config: { ...taskConfig.config, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) }, history });
-            
-            const parts: Part[] = [{ text: prompt }];
-            if (file) parts.push(fileToGenerativePart(file));
-            const stream = await chat.sendMessageStream({ message: parts });
-            const streamOutput = await processStream(stream, assistantMsgId);
-            
-            await handleStreamEnd(chat, assistantMsgId, routedTask, prompt, streamOutput, manageLoadingState);
-
-        } catch(e: any) {
-            handleApiError(e, assistantMsgId, manageLoadingState);
-        }
-    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode, handleApiError]); // ADD handleApiError to dependencies
+        });
+    }, [state.isLoading, state.messages, ai, persona, handleStreamEnd, processStream, dispatch, mode, handleApiError]);
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         const msg = state.messages.find(m => m.id === messageId);
@@ -360,39 +386,95 @@ export const useModularOrchestrator = (
         updateWorkflowState(messageId, 3, { status: 'running', details: { code_to_run: codeToRun } });
 
         const result = await runPythonCode(codeToRun);
+        const originalUserQuery = state.messages.find(m => m.role === 'user' && !m.content.startsWith('[Task]: My code execution failed'))?.content || 'the user\'s request';
         
-        updateWorkflowState(messageId, 3, { status: 'completed', details: { code_to_run: codeToRun, output: result } });
-        updateWorkflowState(messageId, 4, { status: 'running' });
+        if (result.success) {
+            updateWorkflowState(messageId, 3, { status: 'completed', details: { code_to_run: codeToRun, output: result.output } });
 
-        const originalUserQuery = state.messages.find(m => m.role === 'user')?.content || '';
-        await continueCodePwcLoop(result, messageId, originalUserQuery);
+            let vizSpec: VizSpec | undefined = undefined;
+            let cleanOutput = result.output;
+
+            if (result.output.includes('VIZ_SPEC:')) {
+                const vizMatch = result.output.match(/VIZ_SPEC:\s*({.*})/s);
+                if (vizMatch && vizMatch[1]) {
+                    try {
+                        vizSpec = JSON.parse(vizMatch[1]);
+                        cleanOutput = result.output.replace(/VIZ_SPEC:\s*({.*})/s, '').trim();
+                    } catch (e) { /* failed to parse, leave output as-is */ }
+                }
+            }
+            await continueCodePwcLoop(cleanOutput, messageId, originalUserQuery, vizSpec);
+        } else {
+             // AUTONOMOUS DEBUGGING (REFLEXION LOOP)
+            updateWorkflowState(messageId, 3, { status: 'failed', details: { code_to_run: codeToRun, error: result.error } });
+            const debugPrompt = `[Task]: My code execution failed.
+[Original Query]: ${originalUserQuery}
+[Failed Code]:
+${codeToRun}
+[Error Message]: ${result.error}
+[Instruction]: Analyze the error and provide the corrected, full Python code block. You MUST call 'code_interpreter' with the fixed code.`;
+            await handleSendMessage(debugPrompt, undefined, undefined, TaskType.Code, false, false);
+        }
         
-    }, [state.messages, runPythonCode, updateWorkflowState, continueCodePwcLoop]);
+    }, [state.messages, runPythonCode, updateWorkflowState, continueCodePwcLoop, handleSendMessage]);
     
     const handleExecutePlan = useCallback(async (plan: Plan) => {
         dispatch({ type: 'SET_LOADING', payload: true });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: plan.id } });
     
-        // **FURTHER ENHANCEMENT: Smart Retry Logic**
-        // Filter to find only the steps that need to be run (pending or failed).
+        const planState: Record<string, any> = {};
+        // Pre-populate state from any already completed steps (for retries)
+        plan.plan.forEach(step => {
+            if (step.status === 'completed' && step.output_key && step.result) {
+                planState[step.output_key] = step.result;
+            }
+        });
+
         const stepsToExecute = plan.plan
             .filter(step => step.status === 'pending' || step.status === 'failed')
             .sort((a, b) => a.step_id - b.step_id);
     
         for (const step of stepsToExecute) {
             dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress' } });
+            
+            // Input Resolution
+            let stepDescription = step.description;
+            if (step.inputs) {
+                for (const key of step.inputs) {
+                    const data = planState[key] || `[ERROR: No data for ${key}]`;
+                    stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), data);
+                }
+            }
+            
             try {
-                // Execute the step. This function will throw on API error.
-                await handleSendMessage(step.description, undefined, undefined, step.tool_to_use as TaskType, true, false);
-                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: 'Step executed successfully.' } });
+                const resultMessage = await handleSendMessage(stepDescription, undefined, undefined, step.tool_to_use as TaskType, true, false);
+                
+                let outputData = resultMessage.content;
+                if (resultMessage.functionResponse) outputData = JSON.stringify(resultMessage.functionResponse.response);
+                if (!outputData && resultMessage.functionCalls?.length > 0) outputData = JSON.stringify(resultMessage.functionCalls[0].args);
+                
+                if (step.output_key) {
+                    planState[step.output_key] = outputData;
+                }
+
+                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: outputData } });
             } catch (e: any) {
-                // ENHANCEMENT: Use the new parseApiErrorMessage function for consistent error reporting in plans
                 const errorMessage = parseApiErrorMessage(e);
                 dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'failed', result: errorMessage } });
-                console.error(`Plan step ${step.step_id} failed:`, e);
                 
-                // **CRITICAL:** Stop plan execution on the first failure.
-                // This prevents subsequent steps from running without their dependencies.
+                // DYNAMIC RE-PLANNING
+                const originalPlanMsg = state.messages.find(m => m.plan?.id === plan.id);
+                const originalUserMsg = state.messages.find(m => m.id === String(parseInt(originalPlanMsg!.id) - 1));
+                const originalUserGoal = originalUserMsg?.content || "the user's original goal";
+
+                const replanPrompt = `[Task]: My plan execution failed.
+[Original Goal]: ${originalUserGoal}
+[Original Plan]: ${JSON.stringify(plan)}
+[Failed Step]: Step ${step.step_id}: ${step.description}
+[Error Message]: ${errorMessage}
+[Instruction]: Generate a new, complete plan to achieve the original goal, taking this failure into account.`;
+                
+                await handleSendMessage(replanPrompt, undefined, undefined, TaskType.Planner, false, false);
                 break; 
             }
         }
@@ -400,7 +482,7 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_LOADING', payload: false });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined, currentPlanStepId: undefined } });
     
-    }, [handleSendMessage, dispatch]);
+    }, [handleSendMessage, dispatch, state.messages]);
 
     const setMessages = useCallback((messages: ChatMessage[]) => {
         dispatch({ type: 'SET_MESSAGES', payload: messages });

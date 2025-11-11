@@ -43,6 +43,9 @@ export interface PlanStep {
   // New fields for execution tracking
   status: 'pending' | 'in-progress' | 'completed' | 'failed';
   result?: string;
+  // New fields for stateful plans
+  inputs?: string[];
+  output_key?: string;
 }
 
 export interface Plan {
@@ -79,6 +82,14 @@ export interface WorkflowStepState {
 
 export type WorkflowState = Record<string, WorkflowStepState>; // Key is node ID
 
+// New interface for data visualization specs
+export interface VizSpec {
+  type: 'bar' | 'line' | 'pie';
+  data: any[];
+  dataKey: string; // The key for the 'value' (Y-axis)
+  categoryKey: string; // The key for the 'name' (X-axis)
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
@@ -96,6 +107,7 @@ export interface ChatMessage {
   critique?: CritiqueResult;
   taskType?: TaskType; // Used for visualization of the loading message
   workflowState?: WorkflowState;
+  vizSpec?: VizSpec; // For data visualizations
 }
 
 export interface FileData {

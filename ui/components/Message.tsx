@@ -2,6 +2,7 @@ import React from 'react';
 import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData } from '../../types';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
 import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon } from '../../components/Icons';
+import { Visualization } from './Visualization';
 
 export const Message: React.FC<{ 
     message: ChatMessage;
@@ -116,7 +117,7 @@ export const Message: React.FC<{
     );
   };
 
-  const renderCritique = (critique: CritiqueResult) => ( /* ... (implementation from v2.3 App.tsx) ... */ 
+  const renderCritique = (critique: CritiqueResult) => (
     <div className="mt-2 space-y-3">
         <h4 className="text-sm font-semibold text-foreground/80 flex items-center gap-2"><CritiqueIcon className="w-4 h-4" /> Self-Critique:</h4>
         <div className="p-3 bg-card/50 rounded-sm border border-border text-xs">
@@ -130,7 +131,7 @@ export const Message: React.FC<{
     </div>
   );
 
-  const renderFunctionCalls = (functionCalls: FunctionCall[]) => ( /* ... (implementation from v2.3 App.tsx) ... */ 
+  const renderFunctionCalls = (functionCalls: FunctionCall[]) => (
       <div className="mt-2 space-y-3">
         {functionCalls.map((call) => {
             if (call.name === 'code_interpreter' && call.args.code) {
@@ -147,7 +148,7 @@ export const Message: React.FC<{
                     </div>
                 )
             }
-            return ( /* Renders other tool calls */ <div key={call.id}>...</div> )
+            return ( <div key={call.id} className="text-xs text-foreground/70">(Mock tool call: {call.name})</div> )
         })}
     </div>
   );
@@ -164,6 +165,7 @@ export const Message: React.FC<{
               : message.critique ? renderCritique(message.critique)
               : message.role === 'tool' ? <pre>Tool Output: {JSON.stringify(message.functionResponse?.response, null, 2)}</pre>
               : renderContent(message.content)}
+            {message.vizSpec && <Visualization spec={message.vizSpec} />}
           </div>
           {message.isLoading && message.taskType && message.workflowState && <AgentGraphVisualizer taskType={message.taskType} workflowState={message.workflowState} />}
           {message.sources && message.sources.length > 0 && renderSources(message.sources)}

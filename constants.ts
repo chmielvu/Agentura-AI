@@ -1,3 +1,4 @@
+
 import { TaskType, Persona } from './types';
 import {
     ROUTER_TOOL,
@@ -34,6 +35,7 @@ Available Routes:
 - 'Retry': For requests to retry a failed task, often following a critique.
 - 'ManualRAG': For answering questions using the local RAG archive.
 - 'Meta': For requests to create a new agent.
+- 'DataAnalyst': For requests to analyze, plot, or visualize data.
 
 Based on the user's query and history, choose the most appropriate route and score its complexity.
 `;
@@ -207,6 +209,37 @@ PROCEDURE:
     config: {},
     systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in agentic design and metaprompt engineering.
     OBJECTIVE: To create new, SOTA-compliant system instructions for specialist agents based on a user's simple request.`
+  },
+  // NEW AGENT
+  [TaskType.DataAnalyst]: {
+    model: 'gemini-2.5-pro',
+    title: 'Data Analyst Agent',
+    description: 'Analyzes data and generates visualizations.',
+    tools: [], // This agent *transforms* data, it doesn't run code itself.
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          type: { type: "STRING", enum: ["bar", "line", "pie"] },
+          data: { 
+            type: "ARRAY",
+            items: { type: "OBJECT" }
+          },
+          dataKey: { type: "STRING" },
+          categoryKey: { type: "STRING" },
+        },
+        required: ['type', 'data', 'dataKey', 'categoryKey'],
+      },
+    },
+    systemInstruction: `IDENTITY: You are a 'Data Analyst' agent.
+    OBJECTIVE: Transform unstructured text, CSV, or JSON data from the user's prompt into a structured 'VizSpec' JSON object for visualization.
+    PROCEDURE:
+    1. Analyze the user's prompt, which will contain the data to be visualized.
+    2. Infer the best visualization type ('bar', 'line', 'pie').
+    3. Identify the 'dataKey' (the numeric value) and 'categoryKey' (the label).
+    4. Format the provided data into a JSON array for the 'data' field.
+    5. Your output MUST be *only* the valid 'VizSpec' JSON object. Do not add any conversational text.`
   },
   // Fix: Add missing Embedder agent to satisfy the TaskType enum.
   [TaskType.Embedder]: {

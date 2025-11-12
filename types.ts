@@ -1,3 +1,4 @@
+
 export enum TaskType {
   Chat = 'Chat',
   Research = 'Research',
@@ -11,6 +12,7 @@ export enum TaskType {
   Embedder = 'Embedder',
   ManualRAG = 'ManualRAG',
   Meta = 'Meta', // NEW: For the agent that creates other agents
+  DataAnalyst = 'DataAnalyst', // NEW: For data analysis and visualization
 }
 
 // NEW: Defines the operational mode of the swarm.

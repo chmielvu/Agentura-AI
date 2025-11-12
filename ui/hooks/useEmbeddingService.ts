@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDB, DocChunk } from './useDB';
 
@@ -11,7 +12,8 @@ export const useEmbeddingService = () => {
 
     useEffect(() => {
         try {
-            workerRef.current = new Worker('/embedding-worker.js', { type: 'module' });
+            // FIX: Use relative path './' to ensure worker loads from the correct sandboxed origin
+            workerRef.current = new Worker('./embedding-worker.js', { type: 'module' });
 
             workerRef.current.onmessage = (event) => {
                 const { status, embedding, error, textKey } = event.data;

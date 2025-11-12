@@ -1,3 +1,4 @@
+
 import React, { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource } from '../../types';
@@ -300,7 +301,39 @@ export const useModularOrchestrator = (
                 updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, ragSources } } });
 
-                const finalMessage: ChatMessage = { id: assistantMsgId, role: 'assistant' as const, content: streamOutput.fullText, isLoading: false, sources: streamOutput.sources, functionCalls: streamOutput.functionCalls, ragSources };
+                // --- SOTA ENHANCEMENT: Parse VizSpec ---
+                let vizSpec: VizSpec | undefined = undefined;
+                if (routedTask === TaskType.DataAnalyst) {
+                    try {
+                        // Attempt to extract JSON from a string that might have leading/trailing text
+                        const jsonMatch = streamOutput.fullText.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+                        if (jsonMatch) {
+                            const parsedJson = JSON.parse(jsonMatch[0]);
+                             // Basic validation
+                            if (parsedJson.type && parsedJson.data && parsedJson.dataKey && parsedJson.categoryKey) {
+                                vizSpec = parsedJson;
+                                // Hide the raw JSON from the chat message for a cleaner UI
+                                streamOutput.fullText = "Here is the data visualization you requested:";
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse VizSpec JSON:", e);
+                        // If parsing fails, just show the raw text as an error
+                        streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec JSON]\n\n${streamOutput.fullText}`;
+                    }
+                }
+                // --- End SOTA Enhancement ---
+
+                const finalMessage: ChatMessage = { 
+                    id: assistantMsgId, 
+                    role: 'assistant' as const, 
+                    content: streamOutput.fullText, 
+                    isLoading: false, 
+                    sources: streamOutput.sources, 
+                    functionCalls: streamOutput.functionCalls, 
+                    ragSources,
+                    vizSpec // Add the parsed spec to the message
+                };
                 resolve(finalMessage);
 
             } catch(e: any) {
@@ -470,6 +503,18 @@ export const useModularOrchestrator = (
         
         try {
             if (swarmMode === SwarmMode.InformalCollaborators) {
+                 // --- SOTA Enhancement: If a data file is attached, route directly to DataAnalyst ---
+                if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
+                    await handleSendMessageInternal(prompt, file, repoUrl, TaskType.DataAnalyst);
+                    return;
+                }
+                
+                // --- SOTA Enhancement: If no specific task, but a forced task is provided (e.g., command palette) ---
+                if (forcedTask) {
+                    await handleSendMessageInternal(prompt, file, repoUrl, forcedTask);
+                    return;
+                }
+
                 const plannerPrompt = `User goal is '${prompt}'. You MUST create a plan using only the following agents: ${activeRoster.join(', ')}.`;
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
@@ -498,22 +543,36 @@ export const useModularOrchestrator = (
                     
                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
                 } else {
-                    // FIX: Gracefully handle planner failure instead of crashing.
-                    dispatch({
-                        type: 'UPDATE_ASSISTANT_MESSAGE',
-                        payload: {
-                            messageId: planMessage.id,
-                            update: {
-                                content: "I was unable to generate a valid plan for this request. The Planner agent did not return a valid JSON object. Please try rephrasing your goal.",
-                                isLoading: false,
+                    // FIX: Gracefully handle planner failure OR non-plan responses
+                    // If the planner couldn't make a plan, it might just answer directly. We pass that through.
+                    if (!planMessage.content.includes("I was unable to generate a valid plan")) {
+                        dispatch({
+                            type: 'UPDATE_ASSISTANT_MESSAGE',
+                            payload: {
+                                messageId: planMessage.id,
+                                update: {
+                                    isLoading: false // The message is already updated with content, just stop loading
+                                },
                             },
-                        },
-                    });
+                        });
+                    } else { // It explicitly failed
+                        dispatch({
+                            type: 'UPDATE_ASSISTANT_MESSAGE',
+                            payload: {
+                                messageId: planMessage.id,
+                                update: {
+                                    content: "I was unable to generate a valid plan for this request. The Planner agent did not return a valid JSON object. Please try rephrasing your goal.",
+                                    isLoading: false,
+                                },
+                            },
+                        });
+                    }
                 }
             } else { // Security Service
                  dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: "Executing Security Service pipeline... (mocked for now)", isLoading: false} } });
             }
         } catch (e) {
+            // This catch is for errors *before* an assistant message is created, like the router failing.
             const errorMsg = parseApiErrorMessage(e);
              dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: `Swarm execution failed: ${errorMsg}`, isLoading: false} } });
         } finally {

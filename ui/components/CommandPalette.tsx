@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
@@ -13,6 +14,7 @@ const commandsToShow = [
     TaskType.Code,
     TaskType.Research,
     TaskType.Planner,
+    TaskType.DataAnalyst, // NEW
     TaskType.Creative,
     TaskType.Complex,
     TaskType.Meta,

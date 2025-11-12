@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData, RagSource } from '../../types';
+import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData, RagSource, TaskType } from '../../types';
 import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon, BrainCircuitIcon } from '../../components/Icons';
 import { Visualization } from './Visualization';
 
@@ -9,7 +9,8 @@ export const Message: React.FC<{
     onDebugCode: (messageId: string, functionCallId: string) => void;
     onExecutePlan: (plan: Plan) => void;
     onRetryPlan: (plan: Plan) => void;
-}> = ({ message, onExecuteCode, onDebugCode, onExecutePlan, onRetryPlan }) => {
+    onRequestFeedback: (messageId: string, taskType: TaskType) => void;
+}> = ({ message, onExecuteCode, onDebugCode, onExecutePlan, onRetryPlan, onRequestFeedback }) => {
   const isUser = message.role === 'user';
 
   const renderContent = (content: string) => {
@@ -207,6 +208,17 @@ export const Message: React.FC<{
           {message.sources && message.sources.length > 0 && renderSources(message.sources)}
           {message.ragSources && message.ragSources.length > 0 && renderRagSources(message.ragSources)}
           {message.supervisorReport && renderSupervisorReport(message.supervisorReport)}
+          {!isUser && message.role !== 'tool' && message.taskType && message.taskType !== TaskType.Critique && !message.isLoading && (
+            <div className="mt-2 pt-2 border-t border-border/50">
+                <button 
+                    onClick={() => onRequestFeedback(message.id, message.taskType!)}
+                    className="text-xs text-foreground/60 hover:text-white transition-colors"
+                    title="Provide feedback to fine-tune this agent"
+                >
+                    Provide Feedback
+                </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

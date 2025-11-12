@@ -1,4 +1,4 @@
-import React, { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'; 
+import React, { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource } from '../../types';
 import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
@@ -129,8 +129,14 @@ export const useModularOrchestrator = (
 ) => {
     const [state, dispatch] = useReducer(orchestratorReducer, initialState);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
-    const retryCountRef = useRef(0);
-    const chatInstances = useRef<Record<string, Chat>>({});
+    const [sessionFeedback, setSessionFeedback] = useState<Record<string, string[]>>({});
+
+    const addSessionFeedback = useCallback((taskType: TaskType, feedback: string) => {
+        setSessionFeedback(prev => ({
+            ...prev,
+            [taskType]: [...(prev[taskType] || []), feedback]
+        }));
+    }, []);
 
     useEffect(() => {
         try {
@@ -181,10 +187,16 @@ export const useModularOrchestrator = (
     const getChat = (taskType: TaskType, history: ChatMessage[] = []): Chat => {
         const agentConfig = AGENT_ROSTER[taskType];
         const personaInstruction = PERSONA_CONFIGS[persona].instruction;
-        const systemInstruction = [personaInstruction, agentConfig.systemInstruction].filter(Boolean).join('\n\n');
+
+        let systemInstruction = [personaInstruction, agentConfig.systemInstruction].filter(Boolean).join('\n\n');
+        const feedbackForAgent = sessionFeedback[taskType];
+    
+        if (feedbackForAgent && feedbackForAgent.length > 0) {
+            const feedbackHeader = "\n\n--- CRITICAL USER FEEDBACK (MUST FOLLOW) ---";
+            const feedbackList = feedbackForAgent.map((f, i) => `${i+1}. ${f}`).join('\n');
+            systemInstruction = [systemInstruction, feedbackHeader, feedbackList].join('\n');
+        }
         
-        // Simple state: re-create on each call for now. A more advanced implementation
-        // would persist these in a ref.
         return ai.chats.create({
             model: agentConfig.model,
             config: { ...agentConfig.config, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) },
@@ -213,8 +225,6 @@ export const useModularOrchestrator = (
                 let routedTask = forcedTask;
 
                 if (!routedTask) {
-                    // This is only for the very first message from the user.
-                    // Subsequent calls will have forced tasks from the supervisor.
                     const initialWorkflow: WorkflowState = { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } };
                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
@@ -250,8 +260,6 @@ export const useModularOrchestrator = (
                 const stream = await chat.sendMessageStream({ message: { role: 'user', parts } });
                 const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
-                // Finalize turn logic (PWC loops, etc.)
-                // This logic is simplified for now, focusing on direct output.
                 updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false } } });
 
@@ -263,9 +271,50 @@ export const useModularOrchestrator = (
                 reject(e);
             }
         });
-    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat]);
+    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback]);
 
     const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
+        const failedStep = plan.plan.find(p => p.status === 'failed');
+    
+        if (failedStep) {
+            // --- THIS IS THE REFLEXION LOOP (RETRY) ---
+            dispatch({ type: 'SET_LOADING', payload: true });
+            fullPlanTrace.push({ event: 'retry_initiated', step: failedStep.step_id });
+    
+            const original_prompt = failedStep.description;
+            const failed_output = failedStep.result || 'No error output.';
+            const critique = `This step failed with the following error: ${failed_output}`;
+            const apoPrompt = `[Prompt]: ${original_prompt}\n[Failed Output]: ${failed_output}\n[Critique]: ${critique}`;
+    
+            try {
+                const retryMessage = await handleSendMessageInternal(
+                    apoPrompt, undefined, undefined, TaskType.Retry, true, false
+                );
+    
+                const newPlannerGoal = retryMessage.content;
+                fullPlanTrace.push({ event: 'apo_success', new_goal: newPlannerGoal });
+    
+                const newPlanMessage = await handleSendMessageInternal(
+                    newPlannerGoal, undefined, undefined, TaskType.Planner, false, false
+                );
+    
+                if (newPlanMessage.plan) {
+                    fullPlanTrace.push({ event: 'new_plan_generated', plan: newPlanMessage.plan });
+                    return await handleExecutePlan(newPlanMessage.plan, fullPlanTrace);
+                } else {
+                    throw new Error("Self-correction (Reflexion) failed to generate a new plan.");
+                }
+    
+            } catch (e) {
+                const errorResult = `Self-Correction Error: ${parseApiErrorMessage(e)}`;
+                fullPlanTrace.push({ event: 'retry_failed', details: errorResult });
+                return errorResult;
+            } finally {
+                dispatch({ type: 'SET_LOADING', payload: false });
+            }
+        }
+
+        // --- THIS IS THE STANDARD (NON-RETRY) EXECUTION ---
         dispatch({ type: 'SET_LOADING', payload: true });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: plan.id } });
     
@@ -279,9 +328,9 @@ export const useModularOrchestrator = (
             );
     
             if (executableSteps.length === 0) {
-                // Deadlock
                 const errorResult = "Plan stalled due to missing dependencies.";
                 fullPlanTrace.push({ event: 'plan_failed', details: errorResult });
+                dispatch({ type: 'SET_LOADING', payload: false });
                 return errorResult;
             }
     
@@ -314,6 +363,7 @@ export const useModularOrchestrator = (
                 } else {
                     const errorResult = `Step failed: ${parseApiErrorMessage(result.reason)}`;
                     fullPlanTrace.push({ event: 'plan_failed', details: errorResult });
+                    dispatch({ type: 'SET_LOADING', payload: false });
                     return errorResult;
                 }
             }
@@ -325,6 +375,7 @@ export const useModularOrchestrator = (
         const finalResult = Object.values(planState).pop() || "Plan executed successfully.";
         fullPlanTrace.push({ event: 'plan_success', result: finalResult });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined } });
+        dispatch({ type: 'SET_LOADING', payload: false });
         return finalResult;
     }, [handleSendMessageInternal, dispatch]);
     
@@ -337,17 +388,14 @@ export const useModularOrchestrator = (
         
         try {
             if (swarmMode === SwarmMode.InformalCollaborators) {
-                // 1. Call Planner
                 const plannerPrompt = `User goal is '${prompt}'. You MUST create a plan using only the following agents: ${activeRoster.join(', ')}.`;
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
                 
                 if (planMessage.plan) {
                     fullPlanTrace.push({ event: 'plan_received', plan: planMessage.plan });
-                    // 2. Execute Plan
                     const finalResult = await handleExecutePlan(planMessage.plan, fullPlanTrace);
                     
-                    // 3. Generate Supervisor Report
                     const reportPrompt = `You are a Swarm Evaluator. Here is the full execution trace of a multi-agent swarm. Provide a 'Supervisor's Report' evaluating the swarm's efficiency and logic.\n\nTRACE:\n${JSON.stringify(fullPlanTrace, null, 2)}`;
                     const reportMsg = await handleSendMessageInternal(reportPrompt, undefined, undefined, TaskType.Critique, false, false);
                     
@@ -375,5 +423,5 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_MESSAGES', payload: messages });
     }, [dispatch]);
 
-    return { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan };
+    return { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback };
 };

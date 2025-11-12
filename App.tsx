@@ -8,6 +8,7 @@ import DebuggerModal from './components/Debugger';
 import { agentGraphConfigs } from './ui/components/graphConfigs';
 import { ContextPanel } from './ui/components/ContextPanel';
 import { AGENT_ROSTER } from './constants';
+import { FeedbackModal } from './ui/components/FeedbackModal';
 
 const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
 
@@ -20,11 +21,13 @@ const App: React.FC = () => {
   const [isPyodideReady, setIsPyodideReady] = useState(false);
   const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
   
-  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan } = useModularOrchestrator(persona, swarmMode, activeRoster, pyodideRef);
+  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback } = useModularOrchestrator(persona, swarmMode, activeRoster, pyodideRef);
   const { messages, isLoading } = state;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const [lastGraphableTask, setLastGraphableTask] = useState<{ taskType: TaskType; workflowState: WorkflowState } | null>(null);
+  const [feedbackModal, setFeedbackModal] = useState<{ msgId: string, taskType: TaskType } | null>(null);
+
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, isLoading]);
   useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
@@ -86,6 +89,18 @@ const App: React.FC = () => {
       {debugSession && (
         <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
       )}
+      {feedbackModal && (
+          <FeedbackModal
+              taskType={feedbackModal.taskType}
+              onClose={() => setFeedbackModal(null)}
+              onSubmit={(feedback) => {
+                  if (feedbackModal.taskType) {
+                      addSessionFeedback(feedbackModal.taskType, feedback);
+                  }
+                  setFeedbackModal(null);
+              }}
+          />
+      )}
       <Header
         persona={persona}
         onPersonaChange={handlePersonaChange}
@@ -121,8 +136,9 @@ const App: React.FC = () => {
                             message={msg}
                             onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
                             onDebugCode={handleDebugCode}
-                            onExecutePlan={handleExecutePlan}
-                            onRetryPlan={handleExecutePlan}
+                            onExecutePlan={(plan) => handleExecutePlan(plan, [])}
+                            onRetryPlan={(plan) => handleExecutePlan(plan, [])}
+                            onRequestFeedback={(msgId, taskType) => setFeedbackModal({ msgId, taskType })}
                         />
                     ))}
                     <div ref={messagesEndRef} />

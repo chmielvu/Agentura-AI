@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { XCircleIcon, PlayIcon, StepOverIcon, StopIcon } from './Icons';
 
@@ -98,12 +99,17 @@ const DebuggerModal: React.FC<{
 
     // Expose JS functions to Python
     (window as any).update_js_state = (line: number, locals: any) => {
-      setState(prev => ({
-        ...prev,
-        line,
-        variables: pyodide.toJs(locals),
-        status: 'waiting',
-      }));
+      try {
+        setState(prev => ({
+          ...prev,
+          line,
+          variables: pyodide.toJs(locals),
+          status: 'waiting',
+        }));
+      } catch (e) {
+        console.error("Failed to convert Python locals to JS:", e);
+        setState(prev => ({ ...prev, status: 'error', output: `${prev.output}\n\nError converting Python state.` }));
+      }
     };
 
     (window as any).update_output = (newOutput: string) => {
@@ -116,9 +122,16 @@ const DebuggerModal: React.FC<{
     });
 
     const run = async () => {
-      await pyodide.runPythonAsync(PYTHON_DEBUGGER_SCRIPT);
-      await pyodide.globals.get('debugger_instance').run_debug(code);
-      setState(prev => ({ ...prev, status: 'finished' }));
+      try {
+        await pyodide.runPythonAsync(PYTHON_DEBUGGER_SCRIPT);
+        await pyodide.globals.get('debugger_instance').run_debug(code);
+        setState(prev => ({ ...prev, status: 'finished' }));
+      } catch (e: any) {
+        console.error("Debugger execution failed:", e);
+        const errorMessage = `\n\nDEBUGGER FAILED: ${e.message}`;
+        fullOutput.current += errorMessage;
+        setState(prev => ({ ...prev, output: prev.output + errorMessage, status: 'error' }));
+      }
     };
 
     run();
@@ -149,7 +162,7 @@ const DebuggerModal: React.FC<{
   };
 
   useEffect(() => {
-    if (state.status === 'finished') {
+    if (state.status === 'finished' || state.status === 'error') {
         handleFinish('continue');
     }
   }, [state.status]);

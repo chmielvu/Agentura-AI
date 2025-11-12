@@ -15,7 +15,8 @@
     "zod": "^4.1.12",
     "@genkit-ai/googleai": "^1.22.0",
     "@genkit-ai/flow": "^0.5.17",
-    "recharts": "^3.4.1"
+    "recharts": "^3.4.1",
+    "dexie": "^4.0.7"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

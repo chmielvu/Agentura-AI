@@ -9,6 +9,7 @@ import { agentGraphConfigs } from './ui/components/graphConfigs';
 import { ContextPanel } from './ui/components/ContextPanel';
 import { AGENT_ROSTER } from './constants';
 import { FeedbackModal } from './ui/components/FeedbackModal';
+import { useEmbeddingService } from './ui/hooks/useEmbeddingService';
 
 const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
 
@@ -27,6 +28,7 @@ const App: React.FC = () => {
   
   const [lastGraphableTask, setLastGraphableTask] = useState<{ taskType: TaskType; workflowState: WorkflowState } | null>(null);
   const [feedbackModal, setFeedbackModal] = useState<{ msgId: string, taskType: TaskType } | null>(null);
+  const { isReady: isEmbedderReady, processAndEmbedDocument } = useEmbeddingService();
 
 
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, isLoading]);
@@ -147,7 +149,13 @@ const App: React.FC = () => {
             </main>
             
             <footer className="border-t border-border">
-                <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} isPyodideReady={isPyodideReady}/>
+                <ChatInput 
+                    onSendMessage={handleSendMessage} 
+                    isLoading={isLoading} 
+                    isPyodideReady={isPyodideReady}
+                    isEmbedderReady={isEmbedderReady}
+                    onEmbedFile={processAndEmbedDocument}
+                />
             </footer>
         </div>
       </div>

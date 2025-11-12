@@ -8,8 +8,8 @@ Use the Command Palette (`/`) in the chat interface for runtime commands.
 
 ### In-Studio Setup & Evaluation
 
-**1. Embed Corpus:**
-   - This process is currently manual. Add text files to `canvas_assets/corpus/` and update the `workspace_assets/corpus_embeddings.json` placeholder with their vector representations using `text-embedding-004`.
+**1. Embed Archive:**
+   - Use the paperclip icon (for files) or GitHub icon (for repos) in the chat input to add documents to your personal, persistent archive.
 
 **2. Run Retriever Demo:**
    - Use the chat interface and ask a question that requires information from the corpus.

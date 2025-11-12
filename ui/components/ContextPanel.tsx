@@ -3,6 +3,7 @@ import { SwarmMode, TaskType, WorkflowState } from '../../types';
 import { CommandPalette } from './CommandPalette';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
 import { AgentRoster } from './AgentRoster';
+import { ArchiveManager } from './ArchiveManager';
 
 interface ContextPanelProps {
     swarmMode: SwarmMode;
@@ -14,7 +15,7 @@ interface ContextPanelProps {
     } | null;
 }
 
-type View = 'commands' | 'graph' | 'roster';
+type View = 'commands' | 'graph' | 'roster' | 'archive';
 
 export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
     const [activeTab, setActiveTab] = useState<View>('roster');
@@ -33,6 +34,8 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
                 );
             case 'roster':
                 return <AgentRoster {...props} />;
+            case 'archive': 
+                return <ArchiveManager />;
             default:
                 return null;
         }
@@ -42,6 +45,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
         <div className="h-full flex flex-col bg-card/50">
             <div className="flex-shrink-0 flex items-center border-b border-border">
                 <TabButton name="Agent Roster" view="roster" activeTab={activeTab} setActiveTab={setActiveTab} />
+                <TabButton name="Archive" view="archive" activeTab={activeTab} setActiveTab={setActiveTab} />
                 <TabButton name="Commands" view="commands" activeTab={activeTab} setActiveTab={setActiveTab} />
                 <TabButton name="Graph" view="graph" activeTab={activeTab} setActiveTab={setActiveTab} />
             </div>

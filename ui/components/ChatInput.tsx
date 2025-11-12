@@ -1,3 +1,5 @@
+
+
 import React, { useState, useMemo, useRef } from 'react';
 import { FileData, TaskType } from '../../types';
 import { readFileAsBase64 } from '../hooks/helpers';
@@ -9,7 +11,9 @@ export const ChatInput: React.FC<{
   onSendMessage: (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => void;
   isLoading: boolean;
   isPyodideReady: boolean;
-}> = ({ onSendMessage, isLoading, isPyodideReady }) => {
+  isEmbedderReady: boolean;
+  onEmbedFile: (docName: string, text: string) => Promise<void>;
+}> = ({ onSendMessage, isLoading, isPyodideReady, isEmbedderReady, onEmbedFile }) => {
   const [prompt, setPrompt] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [repoUrl, setRepoUrl] = useState<string | null>(null);
@@ -44,33 +48,87 @@ export const ChatInput: React.FC<{
 
   const handleSubmit = async () => {
     if (isLoading || !isPyodideReady || (!prompt.trim() && !file && !repoUrl)) return;
-    let fileData: FileData | undefined;
-    if (file) { fileData = await readFileAsBase64(file); }
     
-    const commandMatch = commandPaletteRoutes.find(r => prompt.startsWith(r.command));
-    if (commandMatch) {
-      onSendMessage(prompt.replace(commandMatch.command, '').trim(), fileData, repoUrl ?? undefined, commandMatch.task);
-    } else {
-      onSendMessage(prompt, fileData, repoUrl ?? undefined);
+    try {
+        let fileData: FileData | undefined;
+        if (file) { fileData = await readFileAsBase64(file); }
+        
+        const commandMatch = commandPaletteRoutes.find(r => prompt.startsWith(r.command));
+        if (commandMatch) {
+          onSendMessage(prompt.replace(commandMatch.command, '').trim(), fileData, repoUrl ?? undefined, commandMatch.task);
+        } else {
+          onSendMessage(prompt, fileData, repoUrl ?? undefined);
+        }
+    
+        setPrompt(''); setFile(null); setRepoUrl(null);
+    } catch (error) {
+        console.error("Error during message submission:", error);
+        alert(`An error occurred while preparing your message. Please try again.\n\nDetails: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-
-    setPrompt(''); setFile(null); setRepoUrl(null);
   };
   
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+        const file = e.target.files[0];
+        if (file.type.startsWith('image/')) {
+            setFile(file); // Keep image for normal sending
+        } else {
+            // This is a document for the archive
+            try {
+                const text = await file.text();
+                await onEmbedFile(file.name, text);
+                alert(`${file.name} has been embedded in your personal archive.`);
+            } catch (err: any) {
+                alert(`Failed to embed ${file.name}. Error: ${err.message}`);
+            }
+            if (fileInputRef.current) fileInputRef.current.value = ''; // Clear input
+        }
     }
   };
 
-  const handleRepoClick = () => {
-    const url = window.prompt("Enter GitHub repository URL:");
+  const handleRepoClick = async () => {
+    const url = window.prompt("Enter GitHub repository URL (e.g., https://github.com/user/repo):");
     if (url && gitHubRepoRegex.test(url)) {
-        setRepoUrl(url);
+        const match = url.match(gitHubRepoRegex);
+        const [_, owner, repo] = match!;
+        const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`;
+
+        try {
+            const treeResponse = await fetch(treeUrl);
+            if (!treeResponse.ok) throw new Error(`GitHub API error: ${treeResponse.statusText}`);
+            const treeData = await treeResponse.json();
+
+            if (!treeData.tree || !Array.isArray(treeData.tree)) {
+                throw new Error("Could not parse repository file tree. The repository might be empty or invalid.");
+            }
+
+            const filesToIngest = treeData.tree
+                .map((file: any) => file.path)
+                .filter((path: string) => 
+                    (path.endsWith('.md') || path.endsWith('.ts') || path.endsWith('.js') || path.endsWith('.py') || path.endsWith('.txt')) && !path.includes('node_modules')
+                );
+
+            if (filesToIngest.length === 0) {
+                alert("No ingestible files (.md, .ts, .js, .py, .txt) found in the main branch.");
+                return;
+            }
+
+            if (window.confirm(`Ingest ${filesToIngest.length} relevant files from ${repo}? This may take a moment.`)) {
+                for (const path of filesToIngest) {
+                    const fileUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`;
+                    const fileContent = await (await fetch(fileUrl)).text();
+                    await onEmbedFile(path, fileContent);
+                }
+                alert('Repository ingestion complete!');
+            }
+        } catch (e: any) {
+            alert(`Failed to fetch repository. Error: ${e.message}`);
+        }
     } else if (url) {
         alert("Invalid GitHub repository URL.");
     }
-  }
+  };
+
 
   return (
     <div className="bg-card p-4 border-t border-border relative">
@@ -107,9 +165,9 @@ export const ChatInput: React.FC<{
         )}
 
         <div className="flex items-center bg-background rounded-sm p-2 border border-border focus-within:ring-1 focus-within:ring-accent">
-            <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-foreground/70 hover:text-white"><PaperclipIcon /></button>
+            <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-foreground/70 hover:text-white disabled:opacity-50" disabled={!isEmbedderReady}><PaperclipIcon /></button>
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-            <button onClick={handleRepoClick} aria-label="Add GitHub repository" className="p-2 text-foreground/70 hover:text-white"><GitHubIcon /></button>
+            <button onClick={handleRepoClick} aria-label="Add GitHub repository" className="p-2 text-foreground/70 hover:text-white disabled:opacity-50" disabled={!isEmbedderReady}><GitHubIcon /></button>
             <textarea
                 value={prompt}
                 onChange={handlePromptChange}

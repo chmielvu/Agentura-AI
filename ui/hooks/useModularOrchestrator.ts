@@ -4,6 +4,8 @@ import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall,
 import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
+import { useDB } from './useDB';
+import { useEmbeddingService } from './useEmbeddingService';
 
 interface OrchestratorState {
     version: string;
@@ -130,6 +132,8 @@ export const useModularOrchestrator = (
     const [state, dispatch] = useReducer(orchestratorReducer, initialState);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
     const [sessionFeedback, setSessionFeedback] = useState<Record<string, string[]>>({});
+    const { findSimilar } = useDB();
+    const { generateEmbedding } = useEmbeddingService();
 
     const addSessionFeedback = useCallback((taskType: TaskType, feedback: string) => {
         setSessionFeedback(prev => ({
@@ -220,10 +224,10 @@ export const useModularOrchestrator = (
     const handleSendMessageInternal = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true, onStreamUpdate?: (streamedText: string) => void): Promise<ChatMessage> => {
         return new Promise(async (resolve, reject) => {
             const assistantMsgId = Date.now().toString();
+            let routedTask = forcedTask;
+            let finalPrompt = prompt;
             
             try {
-                let routedTask = forcedTask;
-
                 if (!routedTask) {
                     const initialWorkflow: WorkflowState = { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } };
                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
@@ -231,7 +235,14 @@ export const useModularOrchestrator = (
 
                     const routerHistory = state.messages.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
                     const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
-                    routedTask = routerResp.functionCalls?.[0]?.args.route as TaskType || TaskType.Chat;
+                    const proposedRoute = routerResp.functionCalls?.[0]?.args.route as string | undefined;
+
+                    // FIX: Validate the routed task to ensure it exists, otherwise default to Chat.
+                    if (proposedRoute && AGENT_ROSTER.hasOwnProperty(proposedRoute)) {
+                        routedTask = proposedRoute as TaskType;
+                    } else {
+                        routedTask = TaskType.Chat;
+                    }
                 } else {
                      const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: `Executing: ${prompt}`, isLoading: true, taskType: routedTask };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
@@ -239,6 +250,32 @@ export const useModularOrchestrator = (
 
                 if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
                 
+                let ragSources: RagSource[] = [];
+                if (routedTask === TaskType.ManualRAG) {
+                    try {
+                        const queryVector = await generateEmbedding(prompt);
+                        const similarChunks = await findSimilar(queryVector);
+
+                        if (similarChunks.length > 0) {
+                            let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE ---\n";
+                            ragSources = similarChunks.map(c => ({
+                                documentName: c.source,
+                                chunkContent: c.text,
+                                similarityScore: c.similarity
+                            }));
+
+                            ragContext += ragSources
+                                .map(c => `[Source: ${c.documentName}]\n${c.chunkContent}\n`)
+                                .join('---\n');
+
+                            finalPrompt = `${ragContext}\n\nUser Query: ${prompt}`;
+                        }
+                    } catch (e) {
+                        console.error("Client-side RAG failed:", e);
+                        // Failsafe: just send the original prompt
+                    }
+                }
+
                 const agentConfig = AGENT_ROSTER[routedTask];
                 const graphConfig = agentGraphConfigs[routedTask];
                 const workflowState: WorkflowState = {};
@@ -254,16 +291,16 @@ export const useModularOrchestrator = (
                 
                 const chat = getChat(routedTask, state.messages);
                 
-                const parts: Part[] = [{ text: prompt }];
+                const parts: Part[] = [{ text: finalPrompt }];
                 if (file) parts.push(fileToGenerativePart(file));
 
                 const stream = await chat.sendMessageStream({ message: { role: 'user', parts } });
                 const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
                 updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false } } });
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, ragSources } } });
 
-                const finalMessage = { id: assistantMsgId, role: 'assistant' as const, content: streamOutput.fullText, isLoading: false, sources: streamOutput.sources, functionCalls: streamOutput.functionCalls };
+                const finalMessage: ChatMessage = { id: assistantMsgId, role: 'assistant' as const, content: streamOutput.fullText, isLoading: false, sources: streamOutput.sources, functionCalls: streamOutput.functionCalls, ragSources };
                 resolve(finalMessage);
 
             } catch(e: any) {
@@ -271,7 +308,7 @@ export const useModularOrchestrator = (
                 reject(e);
             }
         });
-    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback]);
+    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding]);
 
     const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
         const failedStep = plan.plan.find(p => p.status === 'failed');
@@ -298,9 +335,23 @@ export const useModularOrchestrator = (
                     newPlannerGoal, undefined, undefined, TaskType.Planner, false, false
                 );
     
-                if (newPlanMessage.plan) {
-                    fullPlanTrace.push({ event: 'new_plan_generated', plan: newPlanMessage.plan });
-                    return await handleExecutePlan(newPlanMessage.plan, fullPlanTrace);
+                let parsedPlan: Plan | undefined;
+                try {
+                    const jsonMatch = newPlanMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+                    if (jsonMatch) {
+                        const planJson = JSON.parse(jsonMatch[0]);
+                        if (planJson.plan && Array.isArray(planJson.plan)) {
+                            parsedPlan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
+                        }
+                    }
+                } catch (e) {
+                     console.error("Failed to parse new plan from retry message:", e, "Content:", newPlanMessage.content);
+                }
+
+                if (parsedPlan) {
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
+                    fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
+                    return await handleExecutePlan(parsedPlan, fullPlanTrace);
                 } else {
                     throw new Error("Self-correction (Reflexion) failed to generate a new plan.");
                 }
@@ -339,13 +390,19 @@ export const useModularOrchestrator = (
             });
     
             const stepPromises = executableSteps.map(async step => {
+                // FIX: Validate that the tool specified in the plan exists before trying to run it.
+                const toolName = step.tool_to_use;
+                if (!AGENT_ROSTER.hasOwnProperty(toolName)) {
+                    throw new Error(`Plan referenced an unknown agent: '${toolName}'. Step failed.`);
+                }
+                
                 let stepDescription = step.description;
                 if (step.inputs) {
                     for (const key of step.inputs) {
                         stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), planState[key] || '');
                     }
                 }
-                const resultMessage = await handleSendMessageInternal(stepDescription, undefined, undefined, step.tool_to_use as TaskType, true, false);
+                const resultMessage = await handleSendMessageInternal(stepDescription, undefined, undefined, toolName as TaskType, true, false);
                 return { step, resultMessage };
             });
     
@@ -355,6 +412,26 @@ export const useModularOrchestrator = (
                 if (result.status === 'fulfilled') {
                     const { step, resultMessage } = result.value;
                     let outputData = resultMessage.content;
+
+                    // FIX: Check for and execute 'code_interpreter' function calls.
+                    const codeCall = resultMessage.functionCalls?.find(fc => fc.name === 'code_interpreter');
+                    if (codeCall && codeCall.args.code) {
+                        const codeResult = await runPythonCode(codeCall.args.code);
+                        outputData = codeResult.success ? codeResult.output : `Execution Failed: ${codeResult.error}`;
+                        dispatch({
+                            type: 'UPDATE_ASSISTANT_MESSAGE',
+                            payload: {
+                                messageId: resultMessage.id,
+                                update: {
+                                    content: `Code execution result:\n${outputData}`,
+                                    functionCalls: resultMessage.functionCalls.map(fc => 
+                                        fc.id === codeCall.id ? {...fc, isAwaitingExecution: false} : fc
+                                    )
+                                }
+                            }
+                        });
+                    }
+
                     if (step.output_key) {
                         planState[step.output_key] = outputData;
                     }
@@ -363,6 +440,11 @@ export const useModularOrchestrator = (
                 } else {
                     const errorResult = `Step failed: ${parseApiErrorMessage(result.reason)}`;
                     fullPlanTrace.push({ event: 'plan_failed', details: errorResult });
+                    // Fail the specific step in the UI
+                    const failedStep = executableSteps[results.indexOf(result)];
+                    if (failedStep) {
+                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: failedStep.step_id, status: 'failed', result: errorResult } });
+                    }
                     dispatch({ type: 'SET_LOADING', payload: false });
                     return errorResult;
                 }
@@ -377,7 +459,7 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined } });
         dispatch({ type: 'SET_LOADING', payload: false });
         return finalResult;
-    }, [handleSendMessageInternal, dispatch]);
+    }, [handleSendMessageInternal, dispatch, runPythonCode]);
     
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
@@ -392,16 +474,41 @@ export const useModularOrchestrator = (
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
                 
-                if (planMessage.plan) {
-                    fullPlanTrace.push({ event: 'plan_received', plan: planMessage.plan });
-                    const finalResult = await handleExecutePlan(planMessage.plan, fullPlanTrace);
+                let parsedPlan: Plan | undefined;
+                try {
+                    // Attempt to extract JSON from a string that might have leading/trailing text
+                    const jsonMatch = planMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+                    if (jsonMatch) {
+                        const planJson = JSON.parse(jsonMatch[0]);
+                        if (planJson.plan && Array.isArray(planJson.plan)) {
+                            parsedPlan = { id: `plan-${planMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to parse plan from assistant message:", e, "Content:", planMessage.content);
+                }
+
+                if (parsedPlan) {
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { plan: parsedPlan, content: '' } } });
+                    fullPlanTrace.push({ event: 'plan_received', plan: parsedPlan });
+                    const finalResult = await handleExecutePlan(parsedPlan, fullPlanTrace);
                     
                     const reportPrompt = `You are a Swarm Evaluator. Here is the full execution trace of a multi-agent swarm. Provide a 'Supervisor's Report' evaluating the swarm's efficiency and logic.\n\nTRACE:\n${JSON.stringify(fullPlanTrace, null, 2)}`;
                     const reportMsg = await handleSendMessageInternal(reportPrompt, undefined, undefined, TaskType.Critique, false, false);
                     
                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
                 } else {
-                    throw new Error("Planner failed to generate a plan.");
+                    // FIX: Gracefully handle planner failure instead of crashing.
+                    dispatch({
+                        type: 'UPDATE_ASSISTANT_MESSAGE',
+                        payload: {
+                            messageId: planMessage.id,
+                            update: {
+                                content: "I was unable to generate a valid plan for this request. The Planner agent did not return a valid JSON object. Please try rephrasing your goal.",
+                                isLoading: false,
+                            },
+                        },
+                    });
                 }
             } else { // Security Service
                  dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: "Executing Security Service pipeline... (mocked for now)", isLoading: false} } });

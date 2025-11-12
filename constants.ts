@@ -32,8 +32,7 @@ Available Routes:
 - 'Code': For mathematical/logical computation, PoT, or pure code generation.
 - 'Creative': For generating stories, media prompts, or creative writing.
 - 'Retry': For requests to retry a failed task, often following a critique.
-- 'Embedder': For embedding a document into the local RAG corpus.
-- 'ManualRAG': For answering questions using the local RAG corpus.
+- 'ManualRAG': For answering questions using the local RAG archive.
 - 'Meta': For requests to create a new agent.
 
 Based on the user's query and history, choose the most appropriate route and score its complexity.
@@ -185,21 +184,20 @@ PROCEDURE:
 4. Your final and only output MUST be the text from \`newPrompt\`.
 5. DO NOT ADD any conversational text, pleasantries, or apologies. Your entire response must be the new prompt and nothing else.`
   },
-  [TaskType.Embedder]: {
-      model: 'gemini-2.5-flash',
-      title: 'Embedder Agent',
-      description: 'Embeds a doc into the local corpus.',
-      tools: [],
-      config: {},
-      systemInstruction: 'You are an embedder agent. You take a document and prepare it for the RAG corpus.'
-  },
   [TaskType.ManualRAG]: {
       model: 'gemini-2.5-flash',
       title: 'Local RAG Agent',
-      description: 'Answers questions using the local document corpus.',
+      description: 'Answers questions using the local document archive.',
       tools: [],
       config: {},
-      systemInstruction: "You are a RAG agent. You MUST answer the user's query using ONLY the provided context."
+      systemInstruction: `IDENTITY: You are a RAG agent.
+    OBJECTIVE: To answer the user's query.
+    PROCEDURE:
+    1. The user's prompt will contain a "User Query" at the end.
+    2. The prompt MAY also contain "--- RELEVANT CONTEXT FROM YOUR ARCHIVE ---".
+    3. You MUST answer the query using *only* this provided context.
+    4. You MUST cite your sources using the [Source: ...] tag provided in the context for each piece of information.
+    5. If the provided context is insufficient to answer the query, you MUST state that you cannot answer the question based on the provided documents. Do not use your general knowledge.`
   },
   [TaskType.Meta]: {
     model: 'gemini-2.5-pro',
@@ -209,6 +207,15 @@ PROCEDURE:
     config: {},
     systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in agentic design and metaprompt engineering.
     OBJECTIVE: To create new, SOTA-compliant system instructions for specialist agents based on a user's simple request.`
+  },
+  // Fix: Add missing Embedder agent to satisfy the TaskType enum.
+  [TaskType.Embedder]: {
+    model: 'gemini-2.5-flash',
+    title: 'Embedder Agent',
+    description: 'Generates embeddings for documents for RAG.',
+    tools: [],
+    config: {},
+    systemInstruction: `IDENTITY: You are an embedder agent. You are not user-facing. Your job is to create vector embeddings.`
   }
 };
 

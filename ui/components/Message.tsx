@@ -1,6 +1,6 @@
 import React from 'react';
-import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData } from '../../types';
-import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon } from '../../components/Icons';
+import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData, RagSource } from '../../types';
+import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon, BrainCircuitIcon } from '../../components/Icons';
 import { Visualization } from './Visualization';
 
 export const Message: React.FC<{ 
@@ -21,6 +21,19 @@ export const Message: React.FC<{
         </>
     );
   };
+  
+  const renderSupervisorReport = (report: string) => (
+    <div className="mt-3 pt-3 border-t border-border/50">
+        <details className="text-xs">
+             <summary className="cursor-pointer font-semibold text-foreground/80 mb-2 flex items-center gap-2">
+                <BrainCircuitIcon className="w-4 h-4" /> Supervisor's Report
+             </summary>
+             <div className="mt-2 p-3 bg-background/50 rounded-sm border border-border/50">
+                <pre className="whitespace-pre-wrap font-mono text-foreground/70">{report}</pre>
+             </div>
+        </details>
+    </div>
+  );
 
   const renderRepo = (repo: RepoData) => (
     <div className="mb-2">
@@ -56,6 +69,22 @@ export const Message: React.FC<{
               <span className="truncate">{source.title || new URL(source.uri).hostname}</span>
             </div>
           </a>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderRagSources = (sources: RagSource[]) => (
+    <div className="mt-3 pt-3 border-t border-border/50">
+      <h4 className="text-xs font-semibold text-foreground/80 mb-2 flex items-center gap-2">
+        <PerceptionIcon className="w-4 h-4" /> Grounded in Documents:
+      </h4>
+      <div className="space-y-2">
+        {sources.map((source, index) => (
+          <details key={index} className="text-xs bg-background/50 rounded-sm border border-border/50">
+             <summary className="cursor-pointer font-medium text-foreground/80 p-2">{source.documentName}</summary>
+             <p className="p-2 pt-2 mt-2 border-t border-border/50 text-foreground/70 whitespace-pre-wrap">{source.chunkContent}</p>
+          </details>
         ))}
       </div>
     </div>
@@ -176,6 +205,8 @@ export const Message: React.FC<{
           </div>
           
           {message.sources && message.sources.length > 0 && renderSources(message.sources)}
+          {message.ragSources && message.ragSources.length > 0 && renderRagSources(message.ragSources)}
+          {message.supervisorReport && renderSupervisorReport(message.supervisorReport)}
         </div>
       </div>
     </div>

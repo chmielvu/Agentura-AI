@@ -17,6 +17,7 @@ export const AgentGraphVisualizer: React.FC<{ taskType: TaskType, workflowState:
     const networkRef = useRef<any>(null);
     const graphData = agentGraphConfigs[taskType];
     const [inspectorData, setInspectorData] = useState<{ node: GraphNode, state: WorkflowStepState } | null>(null);
+    const [layoutDirection, setLayoutDirection] = useState<'LR' | 'UD'>('LR');
 
     useEffect(() => {
         if (!containerRef.current || !graphData || typeof vis === 'undefined') return;
@@ -49,9 +50,20 @@ export const AgentGraphVisualizer: React.FC<{ taskType: TaskType, workflowState:
 
         const data = { nodes, edges };
         const options = {
-            layout: { hierarchical: { direction: 'LR', sortMethod: 'directed', levelSeparation: 120 } },
+            layout: { 
+                hierarchical: { 
+                    direction: layoutDirection, 
+                    sortMethod: 'directed', 
+                    levelSeparation: 120 
+                } 
+            },
             physics: { enabled: false },
-            interaction: { dragNodes: false, dragView: false, zoomView: false, selectable: true },
+            interaction: { 
+                dragNodes: false, 
+                dragView: true, 
+                zoomView: true, 
+                selectable: true 
+            },
             nodes: { shape: 'image', size: 22, font: { size: 11, color: '#E0E0E0', face: 'Roboto Mono' }, margin: 8 },
         };
 
@@ -76,7 +88,7 @@ export const AgentGraphVisualizer: React.FC<{ taskType: TaskType, workflowState:
                 networkRef.current = null;
             }
         };
-    }, [taskType, graphData]);
+    }, [taskType, graphData, layoutDirection]);
 
     useEffect(() => {
         if (!networkRef.current || !graphData || !workflowState || !networkRef.current.body) return;
@@ -120,6 +132,26 @@ export const AgentGraphVisualizer: React.FC<{ taskType: TaskType, workflowState:
                 />
             )}
             <div className="mt-2 p-2 bg-card/50 rounded-sm border border-border/50">
+                <div className="flex items-center justify-end gap-2 mb-2">
+                    <button
+                        onClick={() => setLayoutDirection('LR')}
+                        className={`px-2 py-0.5 text-xs rounded-sm transition-colors ${
+                            layoutDirection === 'LR' ? 'bg-accent/80 text-white' : 'bg-background hover:bg-border'
+                        }`}
+                        title="Horizontal Layout"
+                    >
+                        H
+                    </button>
+                    <button
+                        onClick={() => setLayoutDirection('UD')}
+                        className={`px-2 py-0.5 text-xs rounded-sm transition-colors ${
+                            layoutDirection === 'UD' ? 'bg-accent/80 text-white' : 'bg-background hover:bg-border'
+                        }`}
+                        title="Vertical Layout"
+                    >
+                        V
+                    </button>
+                </div>
                 <div ref={containerRef} style={{ height: '100px' }} />
             </div>
         </>

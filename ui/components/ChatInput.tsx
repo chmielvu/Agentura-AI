@@ -21,6 +21,7 @@ export const ChatInput: React.FC<{
       { command: '/research', task: TaskType.Research, desc: 'Search the web for info' },
       { command: '/plan', task: TaskType.Planner, desc: 'Create a multi-step plan' },
       { command: '/creative', task: TaskType.Creative, desc: 'Generate creative content' },
+      { command: '/add_agent', task: TaskType.Meta, desc: 'Create a new agent' },
   ];
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -45,7 +46,14 @@ export const ChatInput: React.FC<{
     if (isLoading || !isPyodideReady || (!prompt.trim() && !file && !repoUrl)) return;
     let fileData: FileData | undefined;
     if (file) { fileData = await readFileAsBase64(file); }
-    onSendMessage(prompt, fileData, repoUrl ?? undefined);
+    
+    const commandMatch = commandPaletteRoutes.find(r => prompt.startsWith(r.command));
+    if (commandMatch) {
+      onSendMessage(prompt.replace(commandMatch.command, '').trim(), fileData, repoUrl ?? undefined, commandMatch.task);
+    } else {
+      onSendMessage(prompt, fileData, repoUrl ?? undefined);
+    }
+
     setPrompt(''); setFile(null); setRepoUrl(null);
   };
   

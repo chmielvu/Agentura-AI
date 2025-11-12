@@ -8,12 +8,17 @@ export enum TaskType {
   Creative = 'Creative',
   Critique = 'Critique',
   Retry = 'Retry',
-  // FIX: Add missing Embedder and ManualRAG task types.
   Embedder = 'Embedder',
   ManualRAG = 'ManualRAG',
+  Meta = 'Meta', // NEW: For the agent that creates other agents
 }
 
-// NEW ENUM: Defines the operational mode of the chat client.
+// NEW: Defines the operational mode of the swarm.
+export enum SwarmMode {
+  SecurityService = 'Security Service',
+  InformalCollaborators = 'Informal Collaborators',
+}
+
 export enum ChatMode {
   Normal = 'Normal',
   Developer = 'Developer',
@@ -30,6 +35,13 @@ export interface GroundingSource {
   title: string;
 }
 
+export interface RagSource {
+  documentName: string;
+  chunkContent: string;
+  similarityScore?: number;
+}
+
+
 export interface RepoData {
   url:string;
   owner: string;
@@ -43,10 +55,8 @@ export interface PlanStep {
   description: string;
   tool_to_use: string;
   acceptance_criteria: string;
-  // New fields for execution tracking
   status: 'pending' | 'in-progress' | 'completed' | 'failed';
   result?: string;
-  // New fields for stateful plans
   inputs?: string[];
   output_key?: string;
 }
@@ -85,12 +95,11 @@ export interface WorkflowStepState {
 
 export type WorkflowState = Record<string, WorkflowStepState>; // Key is node ID
 
-// New interface for data visualization specs
 export interface VizSpec {
   type: 'bar' | 'line' | 'pie';
   data: any[];
-  dataKey: string; // The key for the 'value' (Y-axis)
-  categoryKey: string; // The key for the 'name' (X-axis)
+  dataKey: string;
+  categoryKey: string;
 }
 
 export interface ChatMessage {
@@ -100,6 +109,7 @@ export interface ChatMessage {
   file?: FileData;
   repo?: RepoData;
   sources?: GroundingSource[];
+  ragSources?: RagSource[];
   isLoading?: boolean;
   plan?: Plan;
   functionCalls?: FunctionCall[];
@@ -108,9 +118,10 @@ export interface ChatMessage {
     response: any;
   };
   critique?: CritiqueResult;
-  taskType?: TaskType; // Used for visualization of the loading message
+  supervisorReport?: string; // NEW: For the final swarm evaluation
+  taskType?: TaskType;
   workflowState?: WorkflowState;
-  vizSpec?: VizSpec; // For data visualizations
+  vizSpec?: VizSpec;
 }
 
 export interface FileData {

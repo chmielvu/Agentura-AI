@@ -37,11 +37,15 @@
             animation: {
               'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
               'flow': 'flow 1.5s linear infinite',
+              'led-pulse': 'led-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
             },
             keyframes: {
               flow: {
                 '0%': { transform: 'translateX(-101%)' },
                 '100%': { transform: 'translateX(101%)' },
+              },
+              'led-pulse': {
+                '50%': { boxShadow: '0 0 7px 3px var(--led-glow-color)' },
               }
             }
           }

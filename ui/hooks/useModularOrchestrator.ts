@@ -92,9 +92,17 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
                     if (msg.plan?.id === planId) {
                         const newPlan = {
                             ...msg.plan,
-                            plan: msg.plan.plan.map(step =>
-                                step.step_id === stepId ? { ...step, status, ...(result !== undefined && { result }) } : step
-                            )
+                            plan: msg.plan.plan.map(step => {
+                                if (step.step_id === stepId) {
+                                    let finalResult = result;
+                                    // REFINEMENT: Remove streaming cursor when task is done
+                                    if (status === 'completed' && result && result.endsWith(' |')) {
+                                        finalResult = result.substring(0, result.length - 2);
+                                    }
+                                    return { ...step, status, ...(result !== undefined && { result: finalResult }) };
+                                }
+                                return step;
+                            })
                         };
                         return { ...msg, plan: newPlan };
                     }
@@ -216,8 +224,11 @@ export const useModularOrchestrator = (
           if (chunk.functionCalls) functionCalls.push(...chunk.functionCalls.map(fc => ({ id: `fc-${Date.now()}`, name: fc.name, args: fc.args })));
           const newSources = extractSources(chunk);
           sources = Array.from(new Map([...sources, ...newSources].map(s => [s.uri, s])).values());
-          dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { content: fullText, sources, functionCalls } } });
+          
+          // Pass streaming text to callback *before* updating the main message
           if (onStreamUpdate) onStreamUpdate(fullText);
+          
+          dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { content: fullText, sources, functionCalls } } });
         }
         return { fullText, sources, functionCalls };
     }, [dispatch]);
@@ -299,8 +310,7 @@ export const useModularOrchestrator = (
                 const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
                 updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, ragSources } } });
-
+                
                 // --- SOTA ENHANCEMENT: Parse VizSpec ---
                 let vizSpec: VizSpec | undefined = undefined;
                 if (routedTask === TaskType.DataAnalyst) {
@@ -324,6 +334,8 @@ export const useModularOrchestrator = (
                 }
                 // --- End SOTA Enhancement ---
 
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, ragSources, vizSpec, content: streamOutput.fullText } } });
+
                 const finalMessage: ChatMessage = { 
                     id: assistantMsgId, 
                     role: 'assistant' as const, 
@@ -341,7 +353,7 @@ export const useModularOrchestrator = (
                 reject(e);
             }
         });
-    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding]);
+    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding, updateWorkflowState]);
 
     const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
         const failedStep = plan.plan.find(p => p.status === 'failed');
@@ -435,7 +447,29 @@ export const useModularOrchestrator = (
                         stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), planState[key] || '');
                     }
                 }
-                const resultMessage = await handleSendMessageInternal(stepDescription, undefined, undefined, toolName as TaskType, true, false);
+
+                // --- START STREAMING REFINEMENT ---
+                const resultMessage = await handleSendMessageInternal(
+                    stepDescription, 
+                    undefined, 
+                    undefined, 
+                    toolName as TaskType, 
+                    true, 
+                    false,
+                    (streamedText) => {
+                        // This callback streams real-time updates to the UI
+                        dispatch({ 
+                            type: 'UPDATE_PLAN_STEP', 
+                            payload: { 
+                                planId: plan.id, 
+                                stepId: step.step_id, 
+                                status: 'in-progress', 
+                                result: streamedText + ' |' // Add cursor
+                            } 
+                        });
+                    }
+                );
+                // --- END STREAMING REFINEMENT ---
                 return { step, resultMessage };
             });
     
@@ -504,7 +538,7 @@ export const useModularOrchestrator = (
         try {
             if (swarmMode === SwarmMode.InformalCollaborators) {
                  // --- SOTA Enhancement: If a data file is attached, route directly to DataAnalyst ---
-                if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
+                if (file && (file.type === 'text/csv' || file.type === 'application/json' || file.type === 'text/plain')) {
                     await handleSendMessageInternal(prompt, file, repoUrl, TaskType.DataAnalyst);
                     return;
                 }
@@ -545,7 +579,7 @@ export const useModularOrchestrator = (
                 } else {
                     // FIX: Gracefully handle planner failure OR non-plan responses
                     // If the planner couldn't make a plan, it might just answer directly. We pass that through.
-                    if (!planMessage.content.includes("I was unable to generate a valid plan")) {
+                    if (planMessage.content && !planMessage.content.includes("I was unable to generate a valid plan")) {
                         dispatch({
                             type: 'UPDATE_ASSISTANT_MESSAGE',
                             payload: {
@@ -555,7 +589,7 @@ export const useModularOrchestrator = (
                                 },
                             },
                         });
-                    } else { // It explicitly failed
+                    } else { // It explicitly failed or returned an empty plan
                         dispatch({
                             type: 'UPDATE_ASSISTANT_MESSAGE',
                             payload: {
@@ -581,9 +615,10 @@ export const useModularOrchestrator = (
     }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch]);
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
-        // This function's core logic remains the same, but might need context from the new orchestrator flow
-        // For now, it is assumed to be called within a plan step.
-    }, [state.messages, runPythonCode, updateWorkflowState, handleSendMessageInternal]);
+        // This function is currently stubbed, as its execution is handled within the plan loop.
+        // This stub is left for potential future features e.g. "run this one function call again".
+        console.log("handleExecuteCode called (currently handled in plan execution)", messageId, functionCallId);
+    }, []);
 
     const setMessages = useCallback((messages: ChatMessage[]) => {
         dispatch({ type: 'SET_MESSAGES', payload: messages });

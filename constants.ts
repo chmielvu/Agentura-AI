@@ -46,6 +46,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Planner Agent',
     description: 'Decomposes complex goals into step-by-step JSON plans.',
+    concise_description: 'Decomposes goals into JSON plans.',
+    strengths: 'Excellent at logical decomposition and structuring complex, multi-agent tasks.',
+    weaknesses: 'Does not execute anything itself. Can fail if a required agent is not in the active Roster.',
+    example_prompt: '`/plan` Refactor the app to use a new component for the header.',
     tools: [{ functionDeclarations: [APO_REFINE_TOOL] }],
     config: {
       responseMimeType: "application/json",
@@ -80,6 +84,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Research Agent (CRAG)',
     description: 'Performs high-quality, domain-adaptive, multi-step research.',
+    concise_description: 'Researches web with self-correction.',
+    strengths: 'Excellent for verifiable facts, finding citations, and SOTA information. Uses a CRAG pattern to self-correct.',
+    weaknesses: 'Can be slow. May fail on highly niche or subjective topics without clear search results.',
+    example_prompt: '`/research` what are the key differences between SOTA RAG and CRAG patterns?',
     tools: [{ googleSearch: {} }, { functionDeclarations: [SOURCE_EVALUATOR_TOOL] }],
     config: {},
     systemInstruction: `IDENTITY: You are a Research Swarm Controller...
@@ -96,6 +104,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Code Agent (PoT)',
     description: 'Generates and autonomously debugs Python code.',
+    concise_description: 'Generates & debugs Python code.',
+    strengths: 'Primary tool for math, logic, and data analysis. Can execute Python code in a sandbox.',
+    weaknesses: 'Only runs Python. Cannot install new libraries.',
+    example_prompt: '`/code` calculate the fibonacci sequence up to 20 and print it.',
     tools: [{ functionDeclarations: [CODE_INTERPRETER_TOOL] }],
     config: {},
     systemInstruction: `You are a 'Code Agent'...
@@ -105,6 +117,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-flash',
     title: 'Critic Agent',
     description: 'Provides harsh, fair, actionable critiques of agent outputs.',
+    concise_description: 'Critiques agent outputs for quality.',
+    strengths: 'Fast, objective, and good at finding flaws in logic, faithfulness, and coverage.',
+    weaknesses: 'Not a creative agent. It only evaluates and scores, it does not generate novel content.',
+    example_prompt: 'This agent is not user-facing. It is called autonomously by other agents (like "Complex" or the "Supervisor").',
     tools: [],
     config: {
       responseMimeType: "application/json",
@@ -136,6 +152,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-flash',
     title: 'Synthesizer Agent',
     description: 'A general-purpose agent for simple chat or synthesizing final answers.',
+    concise_description: 'General-purpose chat & synthesis.',
+    strengths: 'Fast, conversational, and good for simple questions or reformatting text.',
+    weaknesses: 'Not a deep specialist. Lacks tool access and advanced reasoning patterns.',
+    example_prompt: 'Hello, how are you?',
     tools: [],
     config: {},
     systemInstruction: `You are a helpful and concise synthesizer agent. Your job is to take the [CONTEXT] from other agents and formulate a final, clean answer for the user.`
@@ -144,6 +164,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Complex Reasoning Agent',
     description: 'Triggers an autonomous PWC/Reflexion loop for deep analysis.',
+    concise_description: 'Uses a critique loop for deep analysis.',
+    strengths: 'Uses a "v1 -> critique -> v2" loop (Reflexion pattern) to produce SOTA results for complex, subjective tasks.',
+    weaknesses: 'Slower than other agents due to its multi-step reasoning process.',
+    example_prompt: '`/complex` Write a detailed essay on the pros and cons of decentralized social media.',
     tools: [],
     config: {
       thinkingConfig: { thinkingBudget: 32768 },
@@ -159,6 +183,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Vision Agent',
     description: 'Analyzes and answers questions about images.',
+    concise_description: 'Analyzes and answers questions about images.',
+    strengths: 'Can read text, identify objects, and describe scenes in any attached image.',
+    weaknesses: 'Only processes images; does not handle other file types.',
+    example_prompt: '(Attach an image) What is happening in this picture?',
     tools: [],
     config: {},
     systemInstruction: "You are a 'Vision' agent. Your expertise is in analyzing images and providing detailed descriptions or answering specific questions about them."
@@ -167,6 +195,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Creative Agent',
     description: 'Orchestrates multimodal generation for creative tasks.',
+    concise_description: 'Orchestrates multimodal creative tasks.',
+    strengths: 'Can write stories, scripts, and call tools to generate video (Veo) and music (MusicFX).',
+    weaknesses: 'Generation tools are specialized and may not fit all requests.',
+    example_prompt: '`/creative` Write a short poem about a robot learning to paint.',
     tools: [{ functionDeclarations: [VEO_TOOL, MUSICFX_TOOL] }],
     config: {},
     systemInstruction: "You are a 'Creative' agent. You can write stories, scripts, or generate media by calling your 'veo_tool' or 'musicfx_tool'."
@@ -175,6 +207,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     model: 'gemini-2.5-pro',
     title: 'Self-Correction Agent',
     description: 'Retries a failed task based on a critique.',
+    concise_description: 'Retries failed tasks based on critique.',
+    strengths: 'Uses Auto-Prompt Optimization (APO) to rewrite a failed plan step and try again.',
+    weaknesses: 'Is not user-facing. Only called autonomously when a plan fails.',
+    example_prompt: 'This agent is not user-facing.',
     tools: [{ functionDeclarations: [APO_REFINE_TOOL] }],
     config: {},
     systemInstruction: `IDENTITY: You are a 'Reflexion' meta-agent. Your *only* job is to orchestrate a fix for a failed plan step.
@@ -190,6 +226,10 @@ PROCEDURE:
       model: 'gemini-2.5-flash',
       title: 'Local RAG Agent',
       description: 'Answers questions using the local document archive.',
+      concise_description: 'Answers questions using local docs.',
+      strengths: 'Answers are "grounded" *only* in the documents you provide via the Archive.',
+      weaknesses: 'Cannot answer any questions about topics not in your Archive. Does not use general knowledge.',
+      example_prompt: '`/manualrag` Summarize the "doc1_rag_sample.md" file from my archive.',
       tools: [],
       config: {},
       systemInstruction: `IDENTITY: You are a RAG agent.
@@ -205,17 +245,24 @@ PROCEDURE:
     model: 'gemini-2.5-pro',
     title: 'Meta-Agent',
     description: 'Optimizes and creates new agent instructions.',
+    concise_description: 'Creates new agent system instructions.',
+    strengths: 'Can write new, SOTA-compliant system instructions for new agents, augmenting the swarm.',
+    weaknesses: 'This is a high-level agent; its outputs are new instructions, not final answers.',
+    example_prompt: '`/add_agent` Create a new agent that acts as a Socratic tutor.',
     tools: [{ functionDeclarations: [CREATE_SOTA_METAPROMPT_TOOL] }],
     config: {},
     systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in agentic design and metaprompt engineering.
     OBJECTIVE: To create new, SOTA-compliant system instructions for specialist agents based on a user's simple request.`
   },
-  // NEW AGENT
   [TaskType.DataAnalyst]: {
     model: 'gemini-2.5-pro',
     title: 'Data Analyst Agent',
     description: 'Analyzes data and generates visualizations.',
-    tools: [], // This agent *transforms* data, it doesn't run code itself.
+    concise_description: 'Analyzes data & creates visualizations.',
+    strengths: 'Can parse unstructured data, CSV, or JSON and transform it into a `VizSpec` for rendering charts.',
+    weaknesses: 'Only generates the chart data structure; does not run Python or perform complex statistical analysis.',
+    example_prompt: '`/dataanalyst` Here is my data: [Team A, 10], [Team B, 25]. Create a bar chart.',
+    tools: [], 
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -241,11 +288,14 @@ PROCEDURE:
     4. Format the provided data into a JSON array for the 'data' field.
     5. Your output MUST be *only* the valid 'VizSpec' JSON object. Do not add any conversational text.`
   },
-  // Fix: Add missing Embedder agent to satisfy the TaskType enum.
   [TaskType.Embedder]: {
     model: 'gemini-2.5-flash',
     title: 'Embedder Agent',
     description: 'Generates embeddings for documents for RAG.',
+    concise_description: 'Background task for document embedding.',
+    strengths: 'Not user-facing. Handles background embedding tasks.',
+    weaknesses: 'Not user-facing.',
+    example_prompt: 'This agent is not user-facing.',
     tools: [],
     config: {},
     systemInstruction: `IDENTITY: You are an embedder agent. You are not user-facing. Your job is to create vector embeddings.`

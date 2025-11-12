@@ -1,3 +1,4 @@
+
 import Dexie, { Table } from 'dexie';
 
 export interface DocChunk {
@@ -98,5 +99,12 @@ export const useDB = () => {
         return await db.chunks.clear();
     };
 
-    return { addDocument, findSimilar, clearArchive, getArchiveSummary, deleteSource };
+    // --- NEW FUNCTION FOR GUIDE MODAL ---
+    const getChunksBySourcePrefix = async (prefix: string) => {
+        const db = getDbInstance();
+        return await db.chunks.where('source').startsWith(prefix).toArray();
+    };
+    // --- END NEW FUNCTION ---
+
+    return { addDocument, findSimilar, clearArchive, getArchiveSummary, deleteSource, getChunksBySourcePrefix };
 };

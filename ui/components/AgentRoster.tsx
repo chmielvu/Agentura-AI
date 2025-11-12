@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import { SwarmMode, TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
@@ -9,9 +10,10 @@ interface AgentRosterProps {
     swarmMode: SwarmMode;
     activeRoster: TaskType[];
     onRosterChange: (roster: TaskType[]) => void;
+    onShowAgentDetails: (agent: any) => void; // NEW
 }
 
-export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoster, onRosterChange }) => {
+export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoster, onRosterChange, onShowAgentDetails }) => {
     const isInformalMode = swarmMode === SwarmMode.InformalCollaborators;
 
     const rosterToDisplay = useMemo(() => {
@@ -37,19 +39,30 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
                 {Object.entries(AGENT_ROSTER).map(([taskType, agent]) => {
                     const isEnabled = rosterToDisplay.includes(taskType as TaskType);
                     return (
-                        <li key={taskType} className="flex items-center justify-between p-1" title={isInformalMode ? `Click to ${isEnabled ? 'disable' : 'enable'} this agent` : agent.description}>
-                            <div className="flex items-start gap-3">
+                        <li key={taskType} className="flex items-center justify-between p-1">
+                            <div className="flex items-start gap-3 flex-1 overflow-hidden">
                                 <BrainCircuitIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEnabled ? 'text-accent' : 'text-foreground/40'}`} />
-                                <div>
-                                    <p className={`font-mono text-sm font-bold ${isEnabled ? 'text-foreground' : 'text-foreground/60'}`}>{agent.title}</p>
-                                    <p className="text-xs text-foreground/60 leading-snug">{agent.description}</p>
+                                <div className="flex-1 overflow-hidden">
+                                    <p className={`font-mono text-sm font-bold ${isEnabled ? 'text-foreground' : 'text-foreground/60'}`}>
+                                        {agent.title}
+                                        {/* --- NEW BUTTON --- */}
+                                        <button 
+                                            onClick={() => onShowAgentDetails(agent)} 
+                                            className="ml-1.5 text-foreground/60 hover:text-white transition-colors"
+                                            title="Explain this agent"
+                                        >
+                                            [?]
+                                        </button>
+                                        {/* --- END NEW BUTTON --- */}
+                                    </p>
+                                    <p className="text-xs text-foreground/60 leading-snug truncate" title={agent.description}>{agent.concise_description}</p>
                                 </div>
                             </div>
                             {isInformalMode && (
                                <button
                                     onClick={() => handleToggle(taskType as TaskType)}
                                     aria-pressed={isEnabled}
-                                    className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full"
+                                    className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full ml-2"
                                 >
                                     <div
                                         className={`w-3 h-3 rounded-full transition-all duration-300 ${

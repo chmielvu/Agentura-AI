@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { SwarmMode, TaskType, WorkflowState } from '../../types';
 import { CommandPalette } from './CommandPalette';
@@ -13,6 +14,7 @@ interface ContextPanelProps {
         taskType: TaskType;
         workflowState: WorkflowState;
     } | null;
+    onShowAgentDetails: (agent: any) => void; // NEW
 }
 
 type View = 'commands' | 'graph' | 'roster' | 'archive';
@@ -33,7 +35,12 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
                     </div>
                 );
             case 'roster':
-                return <AgentRoster {...props} />;
+                return <AgentRoster 
+                            swarmMode={props.swarmMode} 
+                            activeRoster={props.activeRoster} 
+                            onRosterChange={props.onRosterChange}
+                            onShowAgentDetails={props.onShowAgentDetails} // Pass prop
+                       />;
             case 'archive': 
                 return <ArchiveManager />;
             default:

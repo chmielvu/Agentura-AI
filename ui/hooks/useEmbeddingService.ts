@@ -7,12 +7,10 @@ export const useEmbeddingService = () => {
     const [isReady, setIsReady] = useState(false);
     const { addDocument } = useDB();
 
-    // A queue to manage requests to the single-threaded worker
     const requestQueue = useRef<Map<string, { resolve: (embedding: number[]) => void, reject: (error: any) => void }>>(new Map());
 
     useEffect(() => {
         try {
-            // FIX: Use relative path './' to ensure worker loads from the correct sandboxed origin
             workerRef.current = new Worker('./embedding-worker.js', { type: 'module' });
 
             workerRef.current.onmessage = (event) => {
@@ -33,7 +31,6 @@ export const useEmbeddingService = () => {
             workerRef.current.onerror = (event) => {
                 console.error("Embedding worker error:", event);
                 setIsReady(false);
-                // Reject any pending promises in the queue
                 requestQueue.current.forEach((resolver) => {
                     resolver.reject(new Error("Embedding worker failed to load or encountered an error."));
                 });
@@ -49,7 +46,6 @@ export const useEmbeddingService = () => {
     }, []);
 
     const generateEmbedding = useCallback((text: string): Promise<number[]> => {
-        // Use a simple key for the queue
         const textKey = `${Date.now()}-${Math.random()}`;
         return new Promise((resolve, reject) => {
             if (!workerRef.current) {
@@ -61,9 +57,13 @@ export const useEmbeddingService = () => {
         });
     }, []);
 
-    const processAndEmbedDocument = async (docName: string, text: string) => {
-        // A simple chunking strategy
+    const processAndEmbedDocument = async (
+      docName: string, 
+      text: string,
+      onProgress?: (update: { current: number, total: number }) => void
+    ) => {
         const chunks = text.split('\n\n').filter(t => t.trim().length > 20);
+        const totalChunks = chunks.length;
 
         for (const [index, chunk] of chunks.entries()) {
             const embedding = await generateEmbedding(chunk);
@@ -74,6 +74,7 @@ export const useEmbeddingService = () => {
                 embedding: embedding
             };
             await addDocument(docChunk);
+            onProgress?.({ current: index + 1, total: totalChunks });
         }
     };
 

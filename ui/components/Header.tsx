@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Persona, SwarmMode, ChatMessage } from '../../types';
 import { APP_TITLE } from '../../constants';
@@ -10,7 +11,19 @@ export const Header: React.FC<{
   isLoading: boolean;
   isPyodideReady: boolean;
   messages: ChatMessage[];
-}> = ({ persona, onPersonaChange, swarmMode, onSwarmModeChange, isLoading, isPyodideReady, messages }) => {
+  onShowGuide: () => void; // NEW
+  onExportSession: () => void; // NEW
+}> = ({ 
+    persona, 
+    onPersonaChange, 
+    swarmMode, 
+    onSwarmModeChange, 
+    isLoading, 
+    isPyodideReady, 
+    messages,
+    onShowGuide,
+    onExportSession
+}) => {
   const lastMessage = messages[messages.length - 1];
   const currentTask = (isLoading && lastMessage?.taskType) ? lastMessage.taskType : 'Idle';
 
@@ -55,6 +68,21 @@ export const Header: React.FC<{
                 </button>
               ))}
             </div>
+            
+            {/* --- NEW BUTTONS --- */}
+            <button 
+                onClick={onShowGuide} 
+                className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
+            >
+                Agentic Guide
+            </button>
+             <button 
+                onClick={onExportSession} 
+                className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
+            >
+                Export Session
+            </button>
+            {/* --- END NEW BUTTONS --- */}
         </div>
     </header>
   );

@@ -1,5 +1,0 @@
-This directory is for multimodal samples.
-Please add up to 3 images and 1 short MP4 file for the Creative agent to use.
-- sample_image_1.jpg
-- sample_image_2.png
-- sample_video_1.mp4

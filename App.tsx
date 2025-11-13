@@ -268,7 +268,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background text-foreground font-mono">
+    <div className="h-screen w-screen flex flex-row bg-background text-foreground font-mono">
       {debugSession && (
         <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
       )}
@@ -291,31 +291,35 @@ const App: React.FC = () => {
           <ExplainAgentModal agent={explainAgent} onClose={() => setExplainAgent(null)} />
       )}
       
-      <Header
-        persona={persona}
-        onPersonaChange={handlePersonaChange}
-        swarmMode={swarmMode}
-        onSwarmModeChange={handleSwarmModeChange}
-        isLoading={isLoading}
-        isPyodideReady={isPyodideReady}
-        messages={messages}
-        onShowGuide={() => setIsGuideOpen(true)}
-        onExportSession={handleExportSession}
-      />
+      {/* LEFT COLUMN */}
+      <div className="w-[350px] flex-shrink-0 flex flex-col border-r border-border">
+          <AestheticPanel />
+          <div className="flex-1 overflow-y-auto">
+              <ContextPanel 
+                swarmMode={swarmMode}
+                activeRoster={activeRoster}
+                onRosterChange={setActiveRoster}
+                lastTask={lastGraphableTask}
+                onShowAgentDetails={setExplainAgent}
+              />
+          </div>
+      </div>
       
-      <div className="flex-1 flex flex-row overflow-hidden">
-        <AestheticPanel />
-        <aside className="w-[350px] flex-shrink-0 border-r border-border">
-          <ContextPanel 
-            swarmMode={swarmMode}
-            activeRoster={activeRoster}
-            onRosterChange={setActiveRoster}
-            lastTask={lastGraphableTask}
-            onShowAgentDetails={setExplainAgent}
-          />
-        </aside>
-
-        <div className="flex-1 flex flex-col">
+      {/* RIGHT COLUMN */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Header
+          persona={persona}
+          onPersonaChange={handlePersonaChange}
+          swarmMode={swarmMode}
+          onSwarmModeChange={handleSwarmModeChange}
+          isLoading={isLoading}
+          isPyodideReady={isPyodideReady}
+          messages={messages}
+          onShowGuide={() => setIsGuideOpen(true)}
+          onExportSession={handleExportSession}
+        />
+        
+        <div className="flex-1 flex flex-col overflow-hidden">
             <main className="flex-1 overflow-y-auto p-4 flex flex-col">
                 {messages.length === 0 && !isLoading ? (
                     <div className="h-full flex flex-col justify-center items-center text-center text-foreground/70">

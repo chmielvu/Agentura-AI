@@ -10,7 +10,7 @@ export const PolishEagleIcon: React.FC<{ className?: string }> = ({ className = 
     <img 
       src="https://upload.wikimedia.org/wikipedia/commons/3/38/God%C5%82o_PRL_1980.svg" 
       alt="Godło PRL 1980"
-      className="w-full h-full object-contain opacity-90 hover:opacity-100 transition-opacity duration-500 drop-shadow-lg"
+      className="w-full h-full object-contain opacity-90 hover:opacity-100 transition-opacity duration-500 drop-shadow-xl"
     />
   </div>
 );

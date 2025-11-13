@@ -2,7 +2,7 @@
 import React, { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource, ReflexionEntry } from '../../types';
-import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
+import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL, SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL } from '../../constants'; // SOTA: Import SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
 import { useDB } from './useDB';
@@ -54,6 +54,8 @@ const parseCodeFromXML = (xmlString: string): { code: string, error: string | nu
     }
 };
 
+// SOTA: This function is brittle and a major failure point.
+// We are refactoring to remove reliance on it where possible.
 const safeJsonParse = (jsonString: string): { data: any, error: string | null } => {
     try {
         const jsonMatch = jsonString.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
@@ -211,7 +213,8 @@ export const useModularOrchestrator = (
         }
         return ai.chats.create({
             model: agentConfig.model,
-            config: { ...agentConfig.config, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) },
+            // SOTA: Pass tools to config
+            config: { ...agentConfig.config, tools: agentConfig.tools, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) },
             history: history.map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, parts: [{text: m.content}] }))
         });
     };
@@ -245,7 +248,7 @@ export const useModularOrchestrator = (
             const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction.replace('{query}', prompt).replace('{chunks_json}', JSON.stringify(ragSources.map(r => ({ documentName: r.documentName, chunkContent: r.chunkContent }))));
             const rerankMsg = await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false);
             
-            const { data: parsed, error } = safeJsonParse(rerankMsg.content);
+            const { data: parsed, error } = safeJsonParse(rerankMsg.content); // SOTA: Reranker still uses brittle JSON, this is a candidate for tool use refactor.
             if (error || !parsed.reranked_chunks) {
                 console.error("Reranker failed to return valid JSON:", error || "Missing 'reranked_chunks' key.");
                 ragSources = ragSources.slice(0, 5); // Fallback to vector search
@@ -276,6 +279,7 @@ export const useModularOrchestrator = (
                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } } };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
                     const routerHistory = state.messages.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, parts: [{ text: m.content }] }));
+                    // SOTA: Router is one of the few places that correctly uses tools already.
                     const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
                     const proposedRoute = routerResp.functionCalls?.[0]?.args.route as TaskType | undefined;
                     routedTask = proposedRoute && AGENT_ROSTER.hasOwnProperty(proposedRoute) ? proposedRoute : TaskType.Chat;
@@ -312,12 +316,13 @@ export const useModularOrchestrator = (
                 if (workflowState['node-2'] && !isPlanStep) updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
                 
                 let vizSpec: VizSpec | undefined = undefined;
+                // SOTA: Refactor DataAnalyst to use function calls
                 if (routedTask === TaskType.DataAnalyst) {
-                    const { data, error } = safeJsonParse(streamOutput.fullText);
-                    if (error || !data.type || !data.data || !data.dataKey || !data.categoryKey) {
-                        streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec JSON]\n\n${error || 'Missing required keys.'}`;
+                    const vizCall = streamOutput.functionCalls.find(fc => fc.name === 'submit_visualization_spec');
+                    if (!vizCall) {
+                        streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec. The agent did not call the 'submit_visualization_spec' tool.]\n\n${streamOutput.fullText}`;
                     } else {
-                        vizSpec = data;
+                        vizSpec = vizCall.args as VizSpec;
                         streamOutput.fullText = "Here is the data visualization you requested:";
                     }
                 }
@@ -356,12 +361,13 @@ export const useModularOrchestrator = (
                 const critiquePrompt = `You are a Critic. Critique the [Draft] based on the [Original Request] and the [Fact-Check].\n[Original Request]: ${prompt}\n[Draft]: ${draftContent}\n[Fact-Check]: ${researchContent}`;
                 const critiqueMsg = await handleSendMessageInternal(critiquePrompt, undefined, undefined, TaskType.Critique, true);
                 
-                const { data: parsedCritique, error } = safeJsonParse(critiqueMsg.content);
-                if (error || !parsedCritique.critique) {
-                    console.error("Critique parsing failed, using raw content:", error);
-                    critiqueContent = critiqueMsg.content;
+                // SOTA: Refactor to read from function call
+                const critiqueCall = critiqueMsg.functionCalls?.find(fc => fc.name === CRITIQUE_TOOL.name);
+                if (!critiqueCall) {
+                    console.error("Critique parsing failed, agent did not call tool.");
+                    critiqueContent = critiqueMsg.content || "Critique failed.";
                 } else {
-                    critiqueContent = parsedCritique.critique;
+                    critiqueContent = critiqueCall.args.critique;
                 }
                 debateHistory.push(`Cycle ${i+1} Critique: ${critiqueContent}`);
             }
@@ -381,6 +387,7 @@ export const useModularOrchestrator = (
         fullPlanTrace.push({ event: 'self_correction_initiated', step: failedStep.step_id, reason: failedStep.result });
     
         const apoPrompt = `[Prompt]: ${failedStep.description}\n[Failed Output]: ${failedStep.result || 'No output.'}\n[Critique]: This plan step failed.`;
+        // SOTA: The Retry agent correctly uses a tool (APO_REFINE_TOOL), so this call is already robust.
         const retryMessage = await handleSendMessageInternal(apoPrompt, undefined, undefined, TaskType.Retry, true, false);
         const newPlannerGoal = retryMessage.content;
         fullPlanTrace.push({ event: 'apo_success', new_goal: newPlannerGoal });
@@ -392,10 +399,13 @@ export const useModularOrchestrator = (
     
         const newPlanMessage = await handleSendMessageInternal(newPlannerGoal, undefined, undefined, TaskType.Planner, false, false);
     
-        const { data: planJson, error } = safeJsonParse(newPlanMessage.content);
-        if (error || !planJson.plan) {
-            throw new Error(`Self-correction failed: Planner (Retry) returned invalid JSON. ${error}`);
+        // SOTA: Refactor to read from function call
+        const planCall = newPlanMessage.functionCalls?.find(fc => fc.name === 'submit_plan');
+        if (!planCall || !planCall.args.plan) {
+            throw new Error(`Self-correction failed: Planner (Retry) did not return a valid 'submit_plan' tool call.`);
         }
+        const planJson = planCall.args;
+        
         const parsedPlan: Plan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
         dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
         fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
@@ -425,6 +435,7 @@ export const useModularOrchestrator = (
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { content: "Validating plan..." } } });
             pendingSteps.forEach(step => dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: 'Validating...' } }));
             
+            // SOTA: Verifier also uses brittle JSON. This is another candidate for tool use refactor, but we leave it for now.
             const validationPrompt = AGENT_ROSTER[TaskType.Verifier].systemInstruction.replace('{plan_steps_json_array}', JSON.stringify(pendingSteps));
             const validationMsg = await handleSendMessageInternal(validationPrompt, undefined, undefined, TaskType.Verifier, true, false);
             
@@ -494,11 +505,23 @@ export const useModularOrchestrator = (
                     let outputData = resultMessage.content;
                     
                     if (step.tool_to_use === TaskType.Code) {
-                        const { code, error } = parseCodeFromXML(outputData);
+                        const { code, error } = parseCodeFromXML(outputData); // Code agent uses robust XML
                         if (error) { throw new Error(error); } 
                         const codeResult = await runPythonCode(code);
                         outputData = codeResult.success ? codeResult.output : `Execution Failed: ${codeResult.error}`;
                         if (!codeResult.success) { throw new Error(outputData); }
+                    }
+                    
+                    // SOTA: Check for DataAnalyst tool call
+                    if (step.tool_to_use === TaskType.DataAnalyst) {
+                        const vizCall = resultMessage.functionCalls?.find(fc => fc.name === 'submit_visualization_spec');
+                        if (!vizCall) { throw new Error("DataAnalyst agent failed to call 'submit_visualization_spec' tool."); }
+                        // Don't set outputData, the vizSpec is attached to the *message*
+                        // But we need to update the *plan step* with the vizSpec for the UI
+                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: JSON.stringify(vizCall.args, null, 2) } });
+                        // We also need to attach it to the *main* message
+                        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { vizSpec: vizCall.args as VizSpec } } });
+                        outputData = "Visualization Spec Generated."; // Set placeholder for plan state
                     }
 
                     const agenticRagCall = resultMessage.functionCalls?.find(fc => fc.name === 'autonomous_rag_tool');
@@ -509,7 +532,9 @@ export const useModularOrchestrator = (
                     }
 
                     if (step.output_key) planState[step.output_key] = outputData;
-                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: outputData } });
+                    if (step.tool_to_use !== TaskType.DataAnalyst) { // DataAnalyst already set its step
+                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: outputData } });
+                    }
                     fullPlanTrace.push({ event: 'step_completed', step: step.step_id, result: outputData });
                 } else {
                     aStepFailedInThisBatch = true;
@@ -538,6 +563,81 @@ export const useModularOrchestrator = (
         return finalResult;
     }, [handleSendMessageInternal, dispatch, runPythonCode, generateEmbedding, findSimilar, initiateSelfCorrection]);
     
+
+    // SOTA: New function to implement Opportunity 1
+    const runSecurityServicePipeline = async (prompt: string, file: FileData | undefined, repoUrl: string | undefined, initialAssistantMsgId: string) => {
+        let supervisorReport = `**Supervisor Report (Security Service)**\nTrace for goal: "${prompt}"\n\n`;
+        let finalOutput = "Pipeline execution failed.";
+        let executionState: Record<string, any> = { user_prompt: prompt };
+        
+        try {
+            dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: initialAssistantMsgId, role: 'assistant', content: "Initializing Security Service Pipeline...", isLoading: true, taskType: TaskType.Planner} } });
+
+            for (const step of SOTA_SECURITY_PIPELINE.steps) {
+                const stepPrompt = step.task.replace('{{user_prompt}}', prompt).replace('{{final_output}}', finalOutput);
+
+                if (step.agent === 'Supervisor') {
+                    if (step.task === 'execute_plan') {
+                        supervisorReport += "SUPERVISOR: Executing generated plan.\n";
+                        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: supervisorReport } } });
+                        
+                        const plan = executionState.plan as Plan; // Get plan from previous step
+                        if (!plan) throw new Error("Supervisor error: No plan found in state to execute.");
+                        
+                        // Use the existing robust plan executor
+                        const planResult = await handleExecutePlan(plan, []); 
+                        finalOutput = planResult;
+                        executionState.final_output = finalOutput;
+                        supervisorReport += `SUPERVISOR: Plan execution finished. Result: ${finalOutput.substring(0, 100)}...\n`;
+                    }
+                    if (step.task === 'generate_supervisor_report') {
+                         executionState.supervisorReport = supervisorReport + "\nSUPERVISOR: Pipeline complete.";
+                    }
+                } else {
+                    // This is an Agent step
+                    supervisorReport += `SUPERVISOR: Calling ${step.agent} with task: "${stepPrompt.substring(0, 50)}..."\n`;
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: supervisorReport, taskType: step.agent } } });
+                    
+                    const agentResponse = await handleSendMessageInternal(stepPrompt, file, repoUrl, step.agent, true, false);
+
+                    if (step.agent === TaskType.Planner) {
+                        const planCall = agentResponse.functionCalls?.find(fc => fc.name === 'submit_plan');
+                        if (!planCall || !planCall.args.plan) throw new Error("Planner failed to return a 'submit_plan' tool call.");
+                        const parsedPlan: Plan = { id: `plan-${initialAssistantMsgId}`, plan: planCall.args.plan.map((s: any) => ({ ...s, status: 'pending' })) };
+                        executionState.plan = parsedPlan;
+                        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { plan: parsedPlan } } });
+                        supervisorReport += `SUPERVISOR: ${step.agent} returned a plan with ${parsedPlan.plan.length} steps.\n`;
+                    }
+                    if (step.agent === TaskType.Critique) {
+                        const critiqueCall = agentResponse.functionCalls?.find(fc => fc.name === CRITIQUE_TOOL.name);
+                        if (!critiqueCall) throw new Error("Critique agent failed to return a 'submit_critique' tool call.");
+                        executionState.critique = critiqueCall.args;
+                        supervisorReport += `SUPERVISOR: ${step.agent} returned critique. Score: ${critiqueCall.args.scores.coherence}/5.\n`;
+                    }
+                }
+            }
+            
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { 
+                messageId: initialAssistantMsgId, 
+                update: { 
+                    content: finalOutput, 
+                    supervisorReport: executionState.supervisorReport, 
+                    isLoading: false 
+                } 
+            }});
+
+        } catch (e) {
+             const errorMsg = parseApiErrorMessage(e);
+             supervisorReport += `\nSUPERVISOR: Pipeline FAILED. Error: ${errorMsg}`;
+             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { 
+                 messageId: initialAssistantMsgId, 
+                 content: `Pipeline Failed: ${errorMsg}`, 
+                 supervisorReport: supervisorReport, 
+                 isLoading: false 
+            }});
+        }
+    };
+
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
         dispatch({ type: 'SEND_MESSAGE_START', payload: { userMessage: userMsg } });
@@ -579,11 +679,13 @@ export const useModularOrchestrator = (
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
                 
-                const { data: planJson, error } = safeJsonParse(planMessage.content);
-                if (error || !planJson.plan) {
-                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: `I was unable to generate a valid plan. ${error}`, isLoading: false } } });
+                // SOTA: Refactor to read from function call
+                const planCall = planMessage.functionCalls?.find(fc => fc.name === 'submit_plan');
+                if (!planCall || !planCall.args.plan) {
+                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: `I was unable to generate a valid plan (Agent did not call 'submit_plan' tool).`, isLoading: false } } });
                      return;
                 }
+                const planJson = planCall.args;
                 
                 const parsedPlan: Plan = { id: `plan-${planMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
                 dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { plan: parsedPlan, content: '' } } });
@@ -591,11 +693,14 @@ export const useModularOrchestrator = (
                 const finalResult = await handleExecutePlan(parsedPlan, fullPlanTrace);
                 
                 const reportPrompt = `You are a Swarm Evaluator. Here is the full execution trace of a multi-agent swarm. Provide a 'Supervisor's Report' evaluating the swarm's efficiency and logic.\n\nTRACE:\n${JSON.stringify(fullPlanTrace, null, 2)}`;
+                // SOTA: This should also be a tool call
                 const reportMsg = await handleSendMessageInternal(reportPrompt, undefined, undefined, TaskType.Critique, true, false);
-                
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
-            } else { // Security Service
-                 dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: "Executing Security Service pipeline... (mocked for now)", isLoading: false} } });
+                const critiqueCall = reportMsg.functionCalls?.find(fc => fc.name === CRITIQUE_TOOL.name);
+                const reportContent = critiqueCall ? critiqueCall.args.critique : "Supervisor report generation failed.";
+
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportContent, isLoading: false } } });
+            } else { // SOTA: Security Service - Implement Opportunity 1
+                 await runSecurityServicePipeline(prompt, file, repoUrl, finalAssistantMsgId);
             }
         } catch (e) {
             const errorMsg = parseApiErrorMessage(e);
@@ -603,7 +708,7 @@ export const useModularOrchestrator = (
         } finally {
             dispatch({ type: 'SET_LOADING', payload: false });
         }
-    }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch, addReflexionEntry, findSimilarReflexions, generateEmbedding]);
+    }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch, addReflexionEntry, findSimilarReflexions, generateEmbedding, runRoundTableDebate, runSecurityServicePipeline]); // SOTA: Add new functions to dependency array
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         console.log("handleExecuteCode called (currently handled in plan execution)", messageId, functionCallId);

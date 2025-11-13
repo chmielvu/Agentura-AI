@@ -10,12 +10,90 @@ import {
     CREATE_SOTA_METAPROMPT_TOOL,
     AUTONOMOUS_RAG_TOOL // MANDATE 2.2
 } from './ui/hooks/toolDefinitions';
-import { Type } from '@google/genai';
+import { Type, FunctionDeclaration } from '@google/genai'; // Import FunctionDeclaration
 
 export { ROUTER_TOOL };
 
 export const APP_TITLE = "Agentura AI";
 export const APP_VERSION = "4.3.0"; // Operator Overhaul
+
+// --- SOTA IMPROVEMENT (OPPORTUNITY 2): Define tools for structured output ---
+
+const PLAN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    plan: {
+      type: Type.ARRAY,
+      description: "The detailed, step-by-step plan.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          step_id: { type: Type.NUMBER },
+          description: { type: Type.STRING },
+          tool_to_use: { type: Type.STRING, enum: Object.values(TaskType) },
+          acceptance_criteria: { type: Type.STRING },
+          inputs: { type: Type.ARRAY, items: { type: Type.STRING } },
+          output_key: { type: Type.STRING },
+        },
+        required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
+      },
+    },
+  },
+  required: ['plan'],
+};
+
+export const PLAN_TOOL: FunctionDeclaration = {
+    name: 'submit_plan',
+    description: 'Submit the final, selected, optimal JSON plan.',
+    parameters: PLAN_SCHEMA,
+};
+
+const CRITIQUE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+      scores: { 
+          type: Type.OBJECT,
+          properties: { 
+              faithfulness: { type: Type.NUMBER }, 
+              coherence: { type: Type.NUMBER }, 
+              coverage: { type: Type.NUMBER }
+          },
+          required: ['faithfulness', 'coherence', 'coverage']
+      },
+      critique: { type: Type.STRING },
+  },
+  required: ['scores', 'critique'],
+};
+
+export const CRITIQUE_TOOL: FunctionDeclaration = {
+    name: 'submit_critique',
+    description: 'Submit the final critique and scores.',
+    parameters: CRITIQUE_SCHEMA,
+};
+
+const DATA_ANALYST_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    type: { type: Type.STRING, enum: ["bar", "line", "pie"] },
+    data: { 
+      type: Type.ARRAY,
+      items: { type: Type.OBJECT }
+    },
+    dataKey: { type: Type.STRING },
+    categoryKey: { type: Type.STRING },
+  },
+  required: ['type', 'data', 'dataKey', 'categoryKey'],
+};
+
+export const DATA_ANALYST_TOOL: FunctionDeclaration = {
+    name: 'submit_visualization_spec',
+    description: 'Submit the structured VizSpec JSON for rendering.',
+    parameters: DATA_ANALYST_SCHEMA,
+};
+
+
+// --- END SOTA IMPROVEMENT ---
+
 
 export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v4.0).
 OBJECTIVE: Analyze the user's query in the context of the recent chat history. You must assess its complexity and select the single best downstream specialist agent to handle it.
@@ -52,31 +130,9 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     strengths: 'Uses Tree-of-Thoughts (ToT) to deliberate on multiple plans and select the most optimal one.',
     weaknesses: 'Does not execute anything. Higher latency due to internal deliberation.',
     example_prompt: '`/plan` Refactor the app to use a new component for the header.',
-    tools: [],
+    tools: [{ functionDeclarations: [PLAN_TOOL] }], // SOTA: Use tool
     config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          plan: {
-            type: Type.ARRAY,
-            description: "The detailed, step-by-step plan.",
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                step_id: { type: Type.NUMBER },
-                description: { type: Type.STRING },
-                tool_to_use: { type: Type.STRING, enum: Object.values(TaskType) },
-                acceptance_criteria: { type: Type.STRING },
-                inputs: { type: Type.ARRAY, items: { type: Type.STRING } },
-                output_key: { type: Type.STRING },
-              },
-              required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
-            },
-          },
-        },
-        required: ['plan'],
-      },
+      // SOTA: Remove responseMimeType and responseSchema
     },
     systemInstruction: `IDENTITY: You are a 'SOTA Planner Agent' (v4.0).
     OBJECTIVE: To generate the *most optimal* JSON plan to achieve the user's goal.
@@ -87,7 +143,7 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     1.  [PLAN - ToT]: First, internally and silently, generate 2-3 distinct, competing strategies.
     2.  [CRITIQUE - PWC]: Second, internally and silently, critique all plans.
     3.  [SELECT]: Third, select the single best plan.
-    4.  [OUTPUT]: Your final output MUST be *only* the JSON for the selected, optimal plan. DO NOT add any conversational filler, markdown, or explanatory text.`
+    4.  [OUTPUT]: Your final output MUST be to call the \`submit_plan\` tool with the selected, optimal plan.` // SOTA: Update prompt
   },
   [TaskType.Research]: {
     model: 'gemini-2.5-pro',
@@ -131,7 +187,7 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     4.  **Act (Retry):** Respond with the *new* code, formatted *only* in the XML/CDATA protocol.
 
     OUTPUT FORMAT (MANDATORY):
-    Your entire response MUST be the XML/CDATA block. DO NOT add conversational filler, markdown, or explanatory text.
+    Your entire response MUST be the XML/CDATA block. DO NOT add any conversational filler, markdown, or explanatory text.
     <changes>
       <change>
         <file>main.py</file>
@@ -150,32 +206,16 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     strengths: 'Fast, objective, and good at finding flaws in logic, faithfulness, and coverage.',
     weaknesses: 'Not a creative agent. It only evaluates and scores, it does not generate novel content.',
     example_prompt: 'This agent is not user-facing. It is called autonomously by other agents.',
-    tools: [],
+    tools: [{ functionDeclarations: [CRITIQUE_TOOL] }], // SOTA: Use tool
     config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-                scores: { 
-                    type: Type.OBJECT,
-                    properties: { 
-                        faithfulness: { type: Type.NUMBER }, 
-                        coherence: { type: Type.NUMBER }, 
-                        coverage: { type: Type.NUMBER }
-                    },
-                    required: ['faithfulness', 'coherence', 'coverage']
-                },
-                critique: { type: Type.STRING },
-            },
-            required: ['scores', 'critique'],
-        },
+      // SOTA: Remove responseMimeType and responseSchema
     },
     systemInstruction: `IDENTITY: You are a 'Critic' agent. You are a harsh but fair evaluator.
     OBJECTIVE: Evaluate a model's output against the original user query.
     PROCEDURE: 
     1. You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). 
     2. Provide a detailed, actionable critique and suggested revisions.
-    CONSTRAINTS: Your output MUST be *only* the valid JSON object. DO NOT add any conversational filler, markdown, or explanatory text.`
+    CONSTRAINTS: Your output MUST be to call the \`submit_critique\` tool.` // SOTA: Update prompt
   },
   [TaskType.Chat]: {
     model: 'gemini-2.5-flash',
@@ -294,22 +334,9 @@ PROCEDURE:
     strengths: 'Can parse unstructured data, CSV, or JSON and transform it into a `VizSpec` for rendering charts.',
     weaknesses: 'Only generates the chart data structure; does not run Python or perform complex statistical analysis.',
     example_prompt: '`/dataanalyst` Here is my data: [Team A, 10], [Team B, 25]. Create a bar chart.',
-    tools: [], 
+    tools: [{ functionDeclarations: [DATA_ANALYST_TOOL] }], // SOTA: Use tool
     config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          type: { type: Type.STRING, enum: ["bar", "line", "pie"] },
-          data: { 
-            type: Type.ARRAY,
-            items: { type: Type.OBJECT }
-          },
-          dataKey: { type: Type.STRING },
-          categoryKey: { type: Type.STRING },
-        },
-        required: ['type', 'data', 'dataKey', 'categoryKey'],
-      },
+      // SOTA: Remove responseMimeType and responseSchema
     },
     systemInstruction: `IDENTITY: You are a 'Data Analyst' agent.
     OBJECTIVE: Transform unstructured text, CSV, or JSON data from the user's prompt into a structured 'VizSpec' JSON object for visualization.
@@ -318,7 +345,7 @@ PROCEDURE:
     2. Infer the best visualization type ('bar', 'line', 'pie').
     3. Identify the 'dataKey' (the numeric value) and 'categoryKey' (the label).
     4. Format the provided data into a JSON array for the 'data' field.
-    5. Your output MUST be *only* the valid 'VizSpec' JSON object. DO NOT add any conversational filler, markdown, or explanatory text.`
+    5. Your output MUST be to call the \`submit_visualization_spec\` tool.` // SOTA: Update prompt
   },
   [TaskType.Embedder]: {
     model: 'gemini-2.5-flash',
@@ -455,7 +482,7 @@ export const SOTA_SECURITY_PIPELINE = {
       task: 'User goal is: "{{user_prompt}}". Your available agents are [Research, Code, Critique]. Create a comprehensive, step-by-step plan to achieve this goal.' 
     },
     { 
-      agent: 'Supervisor', 
+      agent: 'Supervisor', // This is a meta-agent, not a TaskType
       task: 'execute_plan' 
     },
     { 

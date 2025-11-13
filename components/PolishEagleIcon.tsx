@@ -2,18 +2,15 @@
 import React from 'react';
 
 /**
- * A high-fidelity, uncrowned eagle emblem, based on the 1980 Godło PRL.
- * Designed to be themed with 'currentColor' via className.
+ * Renders the high-fidelity 1980 PRL Eagle using the official Wikimedia source.
+ * Uses an img tag to ensure perfect path rendering and color accuracy.
  */
-export const PolishEagleIcon: React.FC<{ className?: string }> = ({ className = "w-6 h-6" }) => (
-  <svg 
-    className={className} 
-    viewBox="0 0 200 244.47"
-    fill="currentColor" 
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <g transform="translate(-255.43 -433.82)">
-      <path d="m355.43 433.82c-55.23 0-100 44.77-100 100 0 41.22 25.04 76.95 61.12 91.95 0.04-2.8 0.1-5.61 0.1-8.43 0-2.31-0.08-4.62-0.21-6.91-2.92-2.12-5.74-4.41-8.44-6.86-5.41-4.9-12.5-12.72-12.5-22.31 0-11.39 8.24-20.62 18.41-20.62 4.41 0 8.44 1.58 11.51 4.19 1.18-7.06 6.38-12.39 12.1-12.39 3.99 0 7.6 1.9 9.94 4.88 2.06-7.85 9.09-13.62 17.5-13.62 9.77 0 17.69 9.87 17.69 22.1 0 1.34-0.1 2.65-0.34 3.92 2.37 2.88 3.78 6.64 3.78 10.74 0 5.46-2.5 10.28-6.38 13.56-3.88 3.28-8.91 5.23-14.38 5.23-5.46 0-10.49-1.96-14.38-5.23-3.88-3.28-6.38-8.1-6.38-13.56 0-4.1 1.41-7.86 3.78-10.74-0.23-1.27-0.34-2.58-0.34-3.92 0-12.23 7.92-22.1 17.69-22.1 8.41 0 15.44 5.77 17.5 13.62 2.34-2.98 5.95-4.88 9.94-4.88 5.72 0 10.92 5.33 12.1 12.39 3.06-2.61 7.1-4.19 11.51-4.19 10.17 0 18.41 9.23 18.41 20.62 0 9.59-7.09 17.41-12.5 22.31-2.7 2.45-5.52 4.74-8.44 6.86-0.14 2.29-0.21 4.6-0.21 6.91 0 2.82 0.06 5.63 0.1 8.43 36.08-15 61.12-50.73 61.12-91.95 0-55.23-44.77-100-100-100zm-51.27 101.55c-1.35-0.8-2.58-1.8-3.64-3.03-3.15-3.64-4.9-8.45-4.9-13.59 0-10.29 7.4-18.62 16.53-18.62 9.12 0 16.53 8.33 16.53 18.62 0 5.14-1.75 9.95-4.9 13.59-1.06 1.23-2.29 2.23-3.64 3.03-1.35 0.79-2.84 1.19-4.35 1.19s-3-0.4-4.35-1.19zm102.54 0c-1.35-0.8-2.58-1.8-3.64-3.03-3.15-3.64-4.9-8.45-4.9-13.59 0-10.29 7.4-18.62 16.53-18.62 9.12 0 16.53 8.33 16.53 18.62 0 5.14-1.75 9.95-4.9 13.59-1.06 1.23-2.29 2.23-3.64 3.03-1.35 0.79-2.84 1.19-4.35 1.19s-3-0.4-4.35-1.19z" />
-    </g>
-  </svg>
+export const PolishEagleIcon: React.FC<{ className?: string }> = ({ className = "w-24 h-24" }) => (
+  <div className={`${className} flex items-center justify-center overflow-hidden`}>
+    <img 
+      src="https://upload.wikimedia.org/wikipedia/commons/3/38/God%C5%82o_PRL_1980.svg" 
+      alt="Godło PRL 1980"
+      className="w-full h-full object-contain opacity-90 hover:opacity-100 transition-opacity duration-500 drop-shadow-lg"
+    />
+  </div>
 );

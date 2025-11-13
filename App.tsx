@@ -13,6 +13,7 @@ import { FeedbackModal } from './ui/components/FeedbackModal';
 import { useEmbeddingService } from './ui/hooks/useEmbeddingService';
 import { GuideModal } from './ui/components/GuideModal';
 import { ExplainAgentModal } from './ui/components/ExplainAgentModal';
+import { AestheticPanel } from './ui/components/AestheticPanel';
 
 const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
 
@@ -303,6 +304,7 @@ const App: React.FC = () => {
       />
       
       <div className="flex-1 flex flex-row overflow-hidden">
+        <AestheticPanel />
         <aside className="w-[350px] flex-shrink-0 border-r border-border">
           <ContextPanel 
             swarmMode={swarmMode}

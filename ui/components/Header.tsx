@@ -11,8 +11,8 @@ export const Header: React.FC<{
   isLoading: boolean;
   isPyodideReady: boolean;
   messages: ChatMessage[];
-  onShowGuide: () => void; // NEW
-  onExportSession: () => void; // NEW
+  onShowGuide: () => void;
+  onExportSession: () => void;
 }> = ({ 
     persona, 
     onPersonaChange, 
@@ -63,13 +63,13 @@ export const Header: React.FC<{
                   className={`px-2 py-1 text-xs font-medium rounded-sm transition-colors duration-200 ${
                     swarmMode === m ? 'bg-border text-foreground' : 'text-foreground/70 hover:bg-card'
                   }`}
+                  title={m === SwarmMode.TheRoundTable ? "Debate-and-Synthesis loop for creative tasks" : (m === SwarmMode.InformalCollaborators ? "Planner-driven flexible swarm" : "Fixed high-security pipeline")}
                 >
                   {m}
                 </button>
               ))}
             </div>
             
-            {/* --- NEW BUTTONS --- */}
             <button 
                 onClick={onShowGuide} 
                 className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
@@ -82,7 +82,6 @@ export const Header: React.FC<{
             >
                 Export Session
             </button>
-            {/* --- END NEW BUTTONS --- */}
         </div>
     </header>
   );

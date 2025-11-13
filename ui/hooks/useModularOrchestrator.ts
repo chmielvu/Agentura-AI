@@ -1,7 +1,7 @@
 
 import React, { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
-import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource } from '../../types';
+import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource, ReflexionEntry } from '../../types';
 import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL } from '../../constants';
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
@@ -34,6 +34,37 @@ const initialState: OrchestratorState = {
     isLoading: false,
 };
 
+const parseCodeFromXML = (xmlString: string): { code: string, error: string | null } => {
+    try {
+        const contentMatch = xmlString.match(/<content>([\s\S]*?)<\/content>/);
+        if (!contentMatch || !contentMatch[1]) {
+            if (!xmlString.trim().startsWith('<')) return { code: xmlString, error: null };
+            throw new Error("No <content> tag found.");
+        }
+        let content = contentMatch[1].trim();
+        if (content.startsWith("<![CDATA[") && content.endsWith("]]>")) {
+            content = content.substring(9, content.length - 3).trim();
+            return { code: content, error: null };
+        }
+        content = content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        return { code: content, error: null };
+    } catch (e) {
+        const error = e as Error;
+        return { code: "", error: `[ERROR: Code agent did not return valid XML/CDATA: ${error.message}]` };
+    }
+};
+
+const safeJsonParse = (jsonString: string): { data: any, error: string | null } => {
+    try {
+        const jsonMatch = jsonString.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (!jsonMatch) throw new Error("No JSON object or array found in the string.");
+        return { data: JSON.parse(jsonMatch[0]), error: null };
+    } catch (e) {
+        const error = e as Error;
+        return { data: null, error: `JSON parsing failed: ${error.message}. Raw output:\n\n${jsonString}`};
+    }
+};
+
 const orchestratorReducer = (state: OrchestratorState, action: Action): OrchestratorState => {
     switch (action.type) {
         case 'RESTORE_STATE':
@@ -41,23 +72,11 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
         case 'SET_MESSAGES':
             return { ...state, messages: action.payload, agenticState: {} };
         case 'SEND_MESSAGE_START':
-            return {
-                ...state,
-                isLoading: true,
-                messages: [...state.messages, action.payload.userMessage],
-            };
+            return { ...state, isLoading: true, messages: [...state.messages, action.payload.userMessage] };
         case 'ADD_ASSISTANT_MESSAGE':
-            return {
-                ...state,
-                messages: [...state.messages, action.payload.assistantMessage],
-            };
+            return { ...state, messages: [...state.messages, action.payload.assistantMessage] };
         case 'UPDATE_ASSISTANT_MESSAGE':
-            return {
-                ...state,
-                messages: state.messages.map(msg =>
-                    msg.id === action.payload.messageId ? { ...msg, ...action.payload.update } : msg
-                ),
-            };
+            return { ...state, messages: state.messages.map(msg => msg.id === action.payload.messageId ? { ...msg, ...action.payload.update } : msg) };
         case 'SET_LOADING':
             return { ...state, isLoading: action.payload };
         case 'UPDATE_WORKFLOW_STATE': { 
@@ -68,11 +87,7 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
                     if (msg.id === messageId && msg.workflowState) {
                         const nodeKey = `node-${nodeId}`;
                         const existingState = msg.workflowState[nodeKey];
-
-                        if (!existingState) {
-                            return msg;
-                        }
-
+                        if (!existingState) return msg;
                         const updatedState: WorkflowStepState = { ...existingState, ...stateUpdate };
                         if (stateUpdate.status && existingState.status !== stateUpdate.status) {
                             if (stateUpdate.status === 'running') updatedState.startTime = Date.now();
@@ -94,12 +109,14 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
                             ...msg.plan,
                             plan: msg.plan.plan.map(step => {
                                 if (step.step_id === stepId) {
-                                    let finalResult = result;
-                                    // REFINEMENT: Remove streaming cursor when task is done
-                                    if (status === 'completed' && result && result.endsWith(' |')) {
-                                        finalResult = result.substring(0, result.length - 2);
+                                    const newStep = { ...step, status, ...(result !== undefined && { result }) };
+                                    if (status === 'in-progress' && !step.startTime) {
+                                        newStep.startTime = Date.now();
                                     }
-                                    return { ...step, status, ...(result !== undefined && { result: finalResult }) };
+                                    if ((status === 'completed' || status === 'failed') && !step.endTime) {
+                                        newStep.endTime = Date.now();
+                                    }
+                                    return newStep;
                                 }
                                 return step;
                             })
@@ -119,15 +136,10 @@ const orchestratorReducer = (state: OrchestratorState, action: Action): Orchestr
 
 const parseApiErrorMessage = (e: any): string => {
     if (e?.message) {
-        if (e.message.includes('401') || e.message.includes('403') || e.message.includes('API key not valid')) {
-            return "Authentication Error. Please ensure your API Key is valid.";
-        } else if (e.message.includes('429')) {
-            return "API quota exceeded. Please wait and try again later.";
-        } else if (e.message.includes('SAFETY')) {
-            return "The response was blocked by the safety filter due to potential policy violations.";
-        } else {
-            return `Error: ${e.message}`;
-        }
+        if (e.message.includes('401') || e.message.includes('403') || e.message.includes('API key not valid')) return "Authentication Error. Please ensure your API Key is valid.";
+        if (e.message.includes('429')) return "API quota exceeded. Please wait and try again later.";
+        if (e.message.includes('SAFETY')) return "The response was blocked by the safety filter due to potential policy violations.";
+        return `Error: ${e.message}`;
     }
     return "An unknown error occurred.";
 };
@@ -141,14 +153,11 @@ export const useModularOrchestrator = (
     const [state, dispatch] = useReducer(orchestratorReducer, initialState);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
     const [sessionFeedback, setSessionFeedback] = useState<Record<string, string[]>>({});
-    const { findSimilar } = useDB();
+    const { findSimilar, addReflexionEntry, findSimilarReflexions } = useDB();
     const { generateEmbedding } = useEmbeddingService();
 
     const addSessionFeedback = useCallback((taskType: TaskType, feedback: string) => {
-        setSessionFeedback(prev => ({
-            ...prev,
-            [taskType]: [...(prev[taskType] || []), feedback]
-        }));
+        setSessionFeedback(prev => ({ ...prev, [taskType]: [...(prev[taskType] || []), feedback] }));
     }, []);
 
     useEffect(() => {
@@ -156,22 +165,15 @@ export const useModularOrchestrator = (
             const saved = localStorage.getItem('agentic-session');
             if (saved) {
                 const parsed = JSON.parse(saved) as OrchestratorState;
-                if (parsed.version === APP_VERSION) {
-                    dispatch({ type: 'RESTORE_STATE', payload: parsed });
-                } else {
-                    localStorage.removeItem('agentic-session');
-                }
+                if (parsed.version === APP_VERSION) dispatch({ type: 'RESTORE_STATE', payload: parsed });
+                else localStorage.removeItem('agentic-session');
             }
-        } catch (e) { 
-            console.error("Failed to load session", e);
-            localStorage.removeItem('agentic-session');
-        }
+        } catch (e) { localStorage.removeItem('agentic-session'); }
     }, []);
 
     useEffect(() => {
-        try {
-            localStorage.setItem('agentic-session', JSON.stringify(state));
-        } catch (e) { console.error("Failed to save state", e); }
+        try { localStorage.setItem('agentic-session', JSON.stringify(state)); }
+        catch (e) { console.error("Failed to save state", e); }
     }, [state]);
 
     const updateWorkflowState = useCallback((messageId: string, nodeId: number, update: Partial<WorkflowStepState>) => {
@@ -186,33 +188,27 @@ export const useModularOrchestrator = (
     }, [dispatch]);
 
     const runPythonCode = async (code: string): Promise<{ success: boolean; output: string; error?: string }> => {
-        if (!pyodideRef.current) {
-            return { success: false, output: "", error: "Pyodide is not initialized." };
-        }
+        if (!pyodideRef.current) return { success: false, output: "", error: "Pyodide is not initialized." };
         try {
-          pyodideRef.current.runPython(`import sys, io; sys.stdout = io.StringIO()`);
-          const result = await pyodideRef.current.runPythonAsync(code);
-          const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
-          return { success: true, output: stdout || result?.toString() || "Code executed without output." };
+            pyodideRef.current.runPython(`import sys, io; sys.stdout = io.StringIO()`);
+            const result = await pyodideRef.current.runPythonAsync(code);
+            const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
+            return { success: true, output: stdout || result?.toString() || "Code executed without output." };
         } catch (e) {
-            const error = e as Error;
-            return { success: false, output: "", error: error.message };
+            return { success: false, output: "", error: (e as Error).message };
         }
     };
     
     const getChat = (taskType: TaskType, history: ChatMessage[] = []): Chat => {
         const agentConfig = AGENT_ROSTER[taskType];
         const personaInstruction = PERSONA_CONFIGS[persona].instruction;
-
         let systemInstruction = [personaInstruction, agentConfig.systemInstruction].filter(Boolean).join('\n\n');
         const feedbackForAgent = sessionFeedback[taskType];
-    
-        if (feedbackForAgent && feedbackForAgent.length > 0) {
+        if (feedbackForAgent?.length > 0) {
             const feedbackHeader = "\n\n--- CRITICAL USER FEEDBACK (MUST FOLLOW) ---";
             const feedbackList = feedbackForAgent.map((f, i) => `${i+1}. ${f}`).join('\n');
             systemInstruction = [systemInstruction, feedbackHeader, feedbackList].join('\n');
         }
-        
         return ai.chats.create({
             model: agentConfig.model,
             config: { ...agentConfig.config, ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }) },
@@ -227,114 +223,69 @@ export const useModularOrchestrator = (
           if (chunk.functionCalls) functionCalls.push(...chunk.functionCalls.map(fc => ({ id: `fc-${Date.now()}`, name: fc.name, args: fc.args })));
           const newSources = extractSources(chunk);
           sources = Array.from(new Map([...sources, ...newSources].map(s => [s.uri, s])).values());
-          
-          // Pass streaming text to callback *before* updating the main message
           if (onStreamUpdate) onStreamUpdate(fullText);
-          
           dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMessageId, update: { content: fullText, sources, functionCalls } } });
         }
         return { fullText, sources, functionCalls };
     }, [dispatch]);
     
-    // SOTA RAG 2.0: Retrieve-Rerank-Synthesize Pipeline
     const runRerankPipeline = async (prompt: string, assistantMsgId: string) => {
-        let ragSources: RagSource[] = [];
-        
         try {
-            // 1. RETRIEVE
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Retrieving relevant documents from archive..."} } });
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Retrieving relevant documents from archive...", taskType: TaskType.ManualRAG } } });
             const queryVector = await generateEmbedding(prompt);
-            const similarChunks = await findSimilar(queryVector, 10); // Retrieve more chunks (e.g., 10) for reranking
-
+            const similarChunks = await findSimilar(queryVector, 10); 
             if (similarChunks.length === 0) {
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "I couldn't find any relevant documents in your archive for this query."} } });
-                return; // Stop pipeline
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "I couldn't find any relevant documents in your archive for this query.", isLoading: false} } });
+                return;
             }
-
-            ragSources = similarChunks.map(c => ({
-                documentName: c.source,
-                chunkContent: c.text,
-                similarityScore: c.similarity
-            }));
+            let ragSources: RagSource[] = similarChunks.map(c => ({ documentName: c.source, chunkContent: c.text, similarityScore: c.similarity }));
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { ragSources } } });
 
-            // 2. RERANK
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Reranking retrieved documents for relevance..."} } });
-            const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction
-                .replace('{query}', prompt)
-                .replace('{chunks_json}', JSON.stringify(ragSources.map(r => ({ documentName: r.documentName, chunkContent: r.chunkContent }))));
-            
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Reranking retrieved documents for relevance...", taskType: TaskType.Reranker } } });
+            const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction.replace('{query}', prompt).replace('{chunks_json}', JSON.stringify(ragSources.map(r => ({ documentName: r.documentName, chunkContent: r.chunkContent }))));
             const rerankMsg = await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false);
             
-            let rerankedSources: RagSource[] = [];
-            try {
-                const jsonMatch = rerankMsg.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-                if (jsonMatch) {
-                    const parsed = JSON.parse(jsonMatch[0]);
-                    if (parsed.reranked_chunks) {
-                        rerankedSources = parsed.reranked_chunks
-                            .map((c: any) => ({
-                                documentName: c.documentName,
-                                chunkContent: c.chunkContent,
-                                rerankScore: c.rerankScore,
-                            }))
-                            .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
-                            .slice(0, 5); // Take top 5 reranked
-                    }
-                }
-            } catch (e) {
-                console.error("Reranker failed to return valid JSON:", e);
-                rerankedSources = ragSources.slice(0, 5); // Fallback to vector search
+            const { data: parsed, error } = safeJsonParse(rerankMsg.content);
+            if (error || !parsed.reranked_chunks) {
+                console.error("Reranker failed to return valid JSON:", error || "Missing 'reranked_chunks' key.");
+                ragSources = ragSources.slice(0, 5); // Fallback to vector search
+            } else {
+                ragSources = parsed.reranked_chunks
+                    .map((c: any) => ({ documentName: c.documentName, chunkContent: c.chunkContent, rerankScore: c.rerankScore }))
+                    .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
+                    .slice(0, 5);
             }
-            
-            ragSources = rerankedSources.length > 0 ? rerankedSources : ragSources.slice(0, 5);
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { ragSources } } });
 
-            // 3. SYNTHESIZE
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Synthesizing answer from reranked documents..."} } });
-            let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE (Reranked) ---\n";
-            ragContext += ragSources
-                .map(c => `[Source: ${c.documentName} (Score: ${c.rerankScore?.toFixed(2) || 'N/A'})]\n${c.chunkContent}\n`)
-                .join('---\n');
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Synthesizing answer from reranked documents...", taskType: TaskType.Chat} } });
+            let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE (Reranked) ---\n" + ragSources.map(c => `[Source: ${c.documentName} (Score: ${c.rerankScore?.toFixed(2) || 'N/A'})]\n${c.chunkContent}\n`).join('---\n');
             const finalPrompt = `${ragContext}\n\nUser Query: ${prompt}`;
-
             const synthMsg = await handleSendMessageInternal(finalPrompt, undefined, undefined, TaskType.Chat, true, false);
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: synthMsg.content, isLoading: false } } });
 
-        } catch (e) {
-            console.error("RAG pipeline failed:", e);
-            handleApiError(e, assistantMsgId, true);
-        }
+        } catch (e) { handleApiError(e, assistantMsgId, true); }
     };
 
     const handleSendMessageInternal = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true, onStreamUpdate?: (streamedText: string) => void): Promise<ChatMessage> => {
         return new Promise(async (resolve, reject) => {
-            const assistantMsgId = isPlanStep ? `step-${Date.now()}` : Date.now().toString();
+            const assistantMsgId = isPlanStep ? `step-${Date.now()}-${Math.random()}` : Date.now().toString();
             let routedTask = forcedTask;
-            let finalPrompt = prompt;
             
             try {
                 if (!routedTask) {
-                    const initialWorkflow: WorkflowState = { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } };
-                    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
+                    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: { 'node-1': { status: 'running', startTime: Date.now(), details: 'Routing user query...' } } };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
-
                     const routerHistory = state.messages.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, parts: [{ text: m.content }] }));
                     const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
-                    const proposedRoute = routerResp.functionCalls?.[0]?.args.route as string | undefined;
-
-                    if (proposedRoute && AGENT_ROSTER.hasOwnProperty(proposedRoute)) {
-                        routedTask = proposedRoute as TaskType;
-                    } else {
-                        routedTask = TaskType.Chat;
-                    }
+                    const proposedRoute = routerResp.functionCalls?.[0]?.args.route as TaskType | undefined;
+                    routedTask = proposedRoute && AGENT_ROSTER.hasOwnProperty(proposedRoute) ? proposedRoute : TaskType.Chat;
                 } else if (!isPlanStep) {
-                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: routedTask };
-                    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
+                    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: routedTask } } });
+                } else if (isPlanStep && routedTask !== TaskType.Verifier) {
+                     // Don't add a message for verifier calls, they are silent background tasks.
                 }
-                
+
                 if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
-                
                 if (routedTask === TaskType.ManualRAG && !isPlanStep) {
                     await runRerankPipeline(prompt, assistantMsgId);
                     const finalMessage = state.messages.find(m => m.id === assistantMsgId) || state.messages[state.messages.length - 1];
@@ -342,136 +293,166 @@ export const useModularOrchestrator = (
                     return;
                 }
 
-                const agentConfig = AGENT_ROSTER[routedTask];
-                const graphConfig = agentGraphConfigs[routedTask];
+                const agentConfig = AGENT_ROSTER[routedTask!];
+                const graphConfig = agentGraphConfigs[routedTask!];
                 const workflowState: WorkflowState = {};
-                if (graphConfig) {
-                    graphConfig.nodes.forEach(node => { workflowState[`node-${node.id}`] = { status: 'pending' }; });
-                }
+                if (graphConfig) graphConfig.nodes.forEach(node => { workflowState[`node-${node.id}`] = { status: 'pending' }; });
                 if(workflowState['node-1'] && !isPlanStep) {
                     workflowState['node-1'] = { status: 'completed', endTime: Date.now(), details: { routed_to: routedTask } };
                     workflowState['node-2'] = { status: 'running', startTime: Date.now() };
                 }
-
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { taskType: routedTask, workflowState } } });
+                if(!isPlanStep) dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { taskType: routedTask, workflowState } } });
                 
-                const chat = getChat(routedTask, state.messages);
-                
-                const parts: Part[] = [{ text: finalPrompt }];
+                const chat = getChat(routedTask!, state.messages);
+                const parts: Part[] = [{ text: prompt }];
                 if (file) parts.push(fileToGenerativePart(file));
-
                 const stream = await chat.sendMessageStream({ message: { role: 'user', parts } });
                 const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
-                if (workflowState['node-2'] && !isPlanStep) {
-                    updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
-                }
+                if (workflowState['node-2'] && !isPlanStep) updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
                 
                 let vizSpec: VizSpec | undefined = undefined;
                 if (routedTask === TaskType.DataAnalyst) {
-                    try {
-                        const jsonMatch = streamOutput.fullText.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-                        if (jsonMatch) {
-                            const parsedJson = JSON.parse(jsonMatch[0]);
-                            if (parsedJson.type && parsedJson.data && parsedJson.dataKey && parsedJson.categoryKey) {
-                                vizSpec = parsedJson;
-                                streamOutput.fullText = "Here is the data visualization you requested:";
-                            }
-                        }
-                    } catch (e) {
-                        console.error("Failed to parse VizSpec JSON:", e);
-                        streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec JSON]\n\n${streamOutput.fullText}`;
+                    const { data, error } = safeJsonParse(streamOutput.fullText);
+                    if (error || !data.type || !data.data || !data.dataKey || !data.categoryKey) {
+                        streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec JSON]\n\n${error || 'Missing required keys.'}`;
+                    } else {
+                        vizSpec = data;
+                        streamOutput.fullText = "Here is the data visualization you requested:";
                     }
                 }
 
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, vizSpec, content: streamOutput.fullText } } });
-
-                const finalMessage: ChatMessage = { 
-                    id: assistantMsgId, 
-                    role: 'assistant' as const, 
-                    content: streamOutput.fullText, 
-                    isLoading: false, 
-                    sources: streamOutput.sources, 
-                    functionCalls: streamOutput.functionCalls, 
-                    ragSources: [],
-                    vizSpec
-                };
+                const finalMessage: ChatMessage = { id: assistantMsgId, role: 'assistant', content: streamOutput.fullText, isLoading: false, sources: streamOutput.sources, functionCalls: streamOutput.functionCalls, ragSources: [], vizSpec, taskType: routedTask };
+                if (!isPlanStep) { // Only update final message if not a plan step
+                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: finalMessage } });
+                }
                 resolve(finalMessage);
 
-            } catch(e) {
-                handleApiError(e, assistantMsgId, manageLoadingState);
-                reject(e);
-            }
+            } catch(e) { handleApiError(e, assistantMsgId, manageLoadingState); reject(e); }
         });
-    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding, updateWorkflowState]);
+    }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding, updateWorkflowState, runRerankPipeline]);
+
+    const runRoundTableDebate = async (prompt: string, file: FileData | undefined, repoUrl: string | undefined, initialAssistantMsgId: string) => {
+        let draftContent = prompt, researchContent = "No research conducted.", critiqueContent = "No critique generated.";
+        const debateHistory: string[] = [`User Request: ${prompt}`];
+        const NUM_CYCLES = 2;
+
+        try {
+            for (let i = 0; i < NUM_CYCLES; i++) {
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: `**Cycle ${i + 1}/${NUM_CYCLES}:** Refining draft...`, taskType: TaskType.Creative} } });
+                const creativePrompt = i === 0 ? `You are a Creative agent. Create a detailed draft for the following user request: ${prompt}` : `You are a Creative agent. Refine your draft based on the critique.\n[Original Request]: ${prompt}\n[Previous Draft]: ${draftContent}\n[Fact-Check]: ${researchContent}\n[Critique]: ${critiqueContent}`;
+                const creativeMsg = await handleSendMessageInternal(creativePrompt, i === 0 ? file : undefined, repoUrl, TaskType.Creative, true);
+                draftContent = creativeMsg.content;
+                debateHistory.push(`Cycle ${i+1} Draft: ${draftContent}`);
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: `**Cycle ${i + 1}/${NUM_CYCLES}:** (Draft Updated)\n\n${draftContent.substring(0, 500)}...`} } });
+
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: `**Cycle ${i + 1}/${NUM_CYCLES}:** Fact-checking draft...`, taskType: TaskType.Research} } });
+                const researchPrompt = `You are a fact-checker. Analyze the following draft. Identify any claims that need verification and check them using Google Search.\n[Draft]: ${draftContent}`;
+                const researchMsg = await handleSendMessageInternal(researchPrompt, undefined, undefined, TaskType.Research, true);
+                researchContent = researchMsg.content;
+                debateHistory.push(`Cycle ${i+1} Fact-Check: ${researchContent}`);
+
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: `**Cycle ${i + 1}/${NUM_CYCLES}:** Critiquing draft...`, taskType: TaskType.Critique} } });
+                const critiquePrompt = `You are a Critic. Critique the [Draft] based on the [Original Request] and the [Fact-Check].\n[Original Request]: ${prompt}\n[Draft]: ${draftContent}\n[Fact-Check]: ${researchContent}`;
+                const critiqueMsg = await handleSendMessageInternal(critiquePrompt, undefined, undefined, TaskType.Critique, true);
+                
+                const { data: parsedCritique, error } = safeJsonParse(critiqueMsg.content);
+                if (error || !parsedCritique.critique) {
+                    console.error("Critique parsing failed, using raw content:", error);
+                    critiqueContent = critiqueMsg.content;
+                } else {
+                    critiqueContent = parsedCritique.critique;
+                }
+                debateHistory.push(`Cycle ${i+1} Critique: ${critiqueContent}`);
+            }
+
+            const finalPrompt = `You are a Synthesizer agent. Combine the "Round Table" debate history into a single, high-quality, final answer for the user.\n[Debate History]:\n${debateHistory.join('\n\n---\n\n')}\n\n[Final Task]: Synthesize the final draft into a clean, complete response.`;
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: `**Final Synthesis:** Synthesizing final answer...`, taskType: TaskType.Chat} } });
+            const finalMsg = await handleSendMessageInternal(finalPrompt, undefined, undefined, TaskType.Chat, true);
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: initialAssistantMsgId, update: { content: finalMsg.content, isLoading: false } } });
+
+        } catch (e) { handleApiError(e, initialAssistantMsgId, true); }
+    };
 
     const initiateSelfCorrection = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<Plan> => {
         const failedStep = plan.plan.find(p => p.status === 'failed');
-        if (!failedStep) {
-            throw new Error("Self-correction called without a failed step.");
-        }
+        if (!failedStep) throw new Error("Self-correction called without a failed step.");
     
-        fullPlanTrace.push({ event: 'self_correction_initiated', step: failedStep.step_id });
+        fullPlanTrace.push({ event: 'self_correction_initiated', step: failedStep.step_id, reason: failedStep.result });
     
-        const original_prompt = failedStep.description;
-        const failed_output = failedStep.result || 'No error output.';
-        const critique = `This plan step failed with the following error: ${failed_output}`;
-        const apoPrompt = `[Prompt]: ${original_prompt}\n[Failed Output]: ${failed_output}\n[Critique]: ${critique}`;
-    
-        // 1. Call Retry Agent to get a new goal for the planner
+        const apoPrompt = `[Prompt]: ${failedStep.description}\n[Failed Output]: ${failedStep.result || 'No output.'}\n[Critique]: This plan step failed.`;
         const retryMessage = await handleSendMessageInternal(apoPrompt, undefined, undefined, TaskType.Retry, true, false);
         const newPlannerGoal = retryMessage.content;
         fullPlanTrace.push({ event: 'apo_success', new_goal: newPlannerGoal });
     
-        // 2. Call Planner with the new, corrected goal
+        try {
+            const promptEmbedding = await generateEmbedding(failedStep.description);
+            await addReflexionEntry({ promptEmbedding, original_prompt: failedStep.description, failed_output: failedStep.result || 'No output.', critique: `Failed with error: ${failedStep.result}`, successful_fix: newPlannerGoal });
+        } catch (e) { console.error("Failed to save reflexion memory:", e); }
+    
         const newPlanMessage = await handleSendMessageInternal(newPlannerGoal, undefined, undefined, TaskType.Planner, false, false);
     
-        // 3. Parse and return the new plan
-        let parsedPlan: Plan | undefined;
-        try {
-            const jsonMatch = newPlanMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-            if (jsonMatch) {
-                const planJson = JSON.parse(jsonMatch[0]);
-                if (planJson.plan && Array.isArray(planJson.plan)) {
-                    parsedPlan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
-                }
-            }
-        } catch (e) {
-            console.error("Failed to parse new plan from retry message:", e, "Content:", newPlanMessage.content);
+        const { data: planJson, error } = safeJsonParse(newPlanMessage.content);
+        if (error || !planJson.plan) {
+            throw new Error(`Self-correction failed: Planner (Retry) returned invalid JSON. ${error}`);
         }
+        const parsedPlan: Plan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
+        dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
+        fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
+        return parsedPlan;
 
-        if (parsedPlan) {
-            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
-            fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
-            return parsedPlan;
-        } else {
-            throw new Error("Self-correction (Reflexion) failed to generate a new, valid plan.");
-        }
-    }, [handleSendMessageInternal, dispatch]);
+    }, [handleSendMessageInternal, dispatch, generateEmbedding, addReflexionEntry]);
 
     const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
-        // This handles manual retries from the UI button.
-        const manualRetryStep = plan.plan.find(p => p.status === 'failed');
-        if (manualRetryStep) {
+        if (plan.plan.some(p => p.status === 'failed')) {
             try {
                 dispatch({ type: 'SET_LOADING', payload: true });
                 const newPlan = await initiateSelfCorrection(plan, fullPlanTrace);
-                return await handleExecutePlan(newPlan, fullPlanTrace); // Recursive call with new plan
+                return await handleExecutePlan(newPlan, fullPlanTrace);
             } catch (e) {
-                const error = e as Error;
-                const errorResult = `Self-Correction Error: ${error.message || parseApiErrorMessage(e)}`;
+                const errorResult = `Self-Correction Error: ${(e as Error).message}`;
                 fullPlanTrace.push({ event: 'retry_failed', details: errorResult });
                 return errorResult;
-            } finally {
-                 dispatch({ type: 'SET_LOADING', payload: false });
-            }
+            } finally { dispatch({ type: 'SET_LOADING', payload: false }); }
         }
 
         dispatch({ type: 'SET_LOADING', payload: true });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: plan.id } });
     
-        const planState: Record<string, any> = {};
         let pendingSteps = plan.plan.filter(step => step.status === 'pending');
+        
+        try {
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { content: "Validating plan..." } } });
+            pendingSteps.forEach(step => dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: 'Validating...' } }));
+            
+            const validationPrompt = AGENT_ROSTER[TaskType.Verifier].systemInstruction.replace('{plan_steps_json_array}', JSON.stringify(pendingSteps));
+            const validationMsg = await handleSendMessageInternal(validationPrompt, undefined, undefined, TaskType.Verifier, true, false);
+            
+            const { data: parsed, error } = safeJsonParse(validationMsg.content);
+            if (error || !parsed.results) throw new Error(`Plan validation failed: Verifier agent returned invalid JSON. ${error}`);
+            
+            let failedValidations = 0;
+            parsed.results.forEach((res: { step_id: number; status: "PASS" | "FAIL"; reason: string; }) => {
+                if (res.status === 'FAIL') {
+                    failedValidations++;
+                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: res.step_id, status: 'failed', result: `Validation FAILED: ${res.reason}` } });
+                } else {
+                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: res.step_id, status: 'pending', result: 'Validated.' } });
+                }
+            });
+
+            if(failedValidations > 0) throw new Error(`Plan validation failed on ${failedValidations} step(s). See step results for details.`);
+
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { content: "Plan validated. Executing..." } } });
+        } catch (e: any) {
+            fullPlanTrace.push({ event: 'plan_failed_validation', details: e.message });
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { content: `Plan FAILED validation: ${e.message}` } } });
+            dispatch({ type: 'SET_LOADING', payload: false });
+            return e.message;
+        }
+
+        const planState: Record<string, any> = {};
+        pendingSteps = plan.plan.filter(step => step.status === 'pending');
         
         while (pendingSteps.length > 0) {
             const executableSteps = pendingSteps.filter(step => !step.inputs || step.inputs.every(inputKey => planState.hasOwnProperty(inputKey)));
@@ -483,15 +464,10 @@ export const useModularOrchestrator = (
                 return errorResult;
             }
     
-            executableSteps.forEach(step => {
-                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress' } });
-            });
-    
-            const stepPromises = executableSteps.map(async step => {
+            const stepPromises = executableSteps.map(async (step) => {
+                dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: 'Executing...' } });
                 const toolName = step.tool_to_use as TaskType;
-                if (!AGENT_ROSTER.hasOwnProperty(toolName)) {
-                    throw new Error(`Plan referenced an unknown agent: '${toolName}'.`);
-                }
+                if (!AGENT_ROSTER.hasOwnProperty(toolName)) throw new Error(`Plan referenced an unknown agent: '${toolName}'.`);
                 
                 let stepDescription = step.description;
                 if (step.inputs) {
@@ -500,46 +476,9 @@ export const useModularOrchestrator = (
                         stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), typeof inputData === 'string' ? inputData : JSON.stringify(inputData));
                     }
                 }
-
-                if (toolName === TaskType.ManualRAG) {
-                    const queryVector = await generateEmbedding(stepDescription);
-                    const similarChunks = await findSimilar(queryVector, 10);
-                    const ragSources = similarChunks.map(c => ({ documentName: c.source, chunkContent: c.text, similarityScore: c.similarity }));
-                    return { step, resultMessage: { content: JSON.stringify(ragSources), id: '' } };
-                }
-                
-                if (toolName === TaskType.Reranker) {
-                    const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction
-                        .replace('{query}', stepDescription)
-                        .replace('{chunks_json}', planState[step.inputs![0]]);
-                    
-                    return { step, resultMessage: await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false) };
-                }
-                
-                if (toolName === TaskType.Chat && step.inputs?.includes(step.output_key)) {
-                    let rerankedSources: RagSource[] = [];
-                    try {
-                        const parsed = JSON.parse(planState[step.inputs![0]]);
-                        const chunks = parsed.reranked_chunks || parsed; // Handle both direct array and object
-                        rerankedSources = chunks
-                            .map((c: any) => ({ documentName: c.documentName, chunkContent: c.chunkContent, rerankScore: c.rerankScore }))
-                            .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
-                            .slice(0, 5);
-                    } catch (e) { console.error("Reranker step failed to provide valid JSON for synthesizer", e); }
-                    
-                    let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE (Reranked) ---\n";
-                    ragContext += rerankedSources
-                        .map(c => `[Source: ${c.documentName} (Score: ${c.rerankScore?.toFixed(2) || 'N/A'})]\n${c.chunkContent}\n`)
-                        .join('---\n');
-                    stepDescription = `${ragContext}\n\nUser Query: ${stepDescription}`;
-                }
-
-                const resultMessage = await handleSendMessageInternal(
-                    stepDescription, undefined, undefined, toolName, true, false,
-                    (streamedText) => {
-                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: streamedText + ' |'} });
-                    }
-                );
+                const resultMessage = await handleSendMessageInternal(stepDescription, undefined, undefined, toolName, true, false, (streamedText) => {
+                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: streamedText + ' |'} });
+                });
                 return { step, resultMessage };
             });
     
@@ -547,54 +486,45 @@ export const useModularOrchestrator = (
             let aStepFailedInThisBatch = false;
 
             for (const result of results) {
+                const failedStepIndex = results.indexOf(result);
+                const stepThatRan = executableSteps[failedStepIndex];
+
                 if (result.status === 'fulfilled') {
                     const { step, resultMessage } = result.value;
                     let outputData = resultMessage.content;
-
-                    const codeCall = resultMessage.functionCalls?.find(fc => fc.name === 'code_interpreter');
-                    if (codeCall && codeCall.args.code) {
-                        const codeResult = await runPythonCode(codeCall.args.code);
+                    
+                    if (step.tool_to_use === TaskType.Code) {
+                        const { code, error } = parseCodeFromXML(outputData);
+                        if (error) { throw new Error(error); } 
+                        const codeResult = await runPythonCode(code);
                         outputData = codeResult.success ? codeResult.output : `Execution Failed: ${codeResult.error}`;
-                        if (resultMessage.id) {
-                            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: resultMessage.id, update: { content: `Code execution result:\n${outputData}`, functionCalls: resultMessage.functionCalls.map(fc => fc.id === codeCall.id ? {...fc, isAwaitingExecution: false} : fc) }}});
-                        }
+                        if (!codeResult.success) { throw new Error(outputData); }
                     }
 
-                    if (step.output_key) {
-                        planState[step.output_key] = outputData;
+                    const agenticRagCall = resultMessage.functionCalls?.find(fc => fc.name === 'autonomous_rag_tool');
+                    if (agenticRagCall) {
+                        const queryVector = await generateEmbedding(agenticRagCall.args.query);
+                        const similarChunks = await findSimilar(queryVector, 5);
+                        outputData = JSON.stringify(similarChunks.map(c => ({ documentName: c.source, chunkContent: c.text, similarityScore: c.similarity })));
                     }
+
+                    if (step.output_key) planState[step.output_key] = outputData;
                     dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: outputData } });
                     fullPlanTrace.push({ event: 'step_completed', step: step.step_id, result: outputData });
-                } else { // 'rejected'
+                } else {
                     aStepFailedInThisBatch = true;
                     const errorReason = result.reason as any;
-                    const errorResult = `Step failed: ${errorReason.message || parseApiErrorMessage(result.reason)}`;
-                    fullPlanTrace.push({ event: 'step_failed', details: errorResult });
-                    // Find the step that corresponds to this failed promise
-                    const failedStep = executableSteps[results.indexOf(result)];
-                    if (failedStep) {
-                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: failedStep.step_id, status: 'failed', result: errorResult } });
-                    }
+                    const errorResult = `Step ${stepThatRan.step_id} (${stepThatRan.tool_to_use}) failed: ${errorReason.message || parseApiErrorMessage(result.reason)}`;
+                    fullPlanTrace.push({ event: 'step_failed', step: stepThatRan.step_id, details: errorResult });
+                    dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: stepThatRan.step_id, status: 'failed', result: errorResult } });
                 }
             }
             
             if (aStepFailedInThisBatch) {
-                // Autonomous self-correction is triggered
-                try {
-                    const currentMessage = state.messages.find(msg => msg.plan?.id === plan.id);
-                    if (currentMessage && currentMessage.plan) {
-                        const newPlan = await initiateSelfCorrection(currentMessage.plan, fullPlanTrace);
-                        return await handleExecutePlan(newPlan, fullPlanTrace); // Recursive call with the new corrected plan
-                    } else {
-                        throw new Error("Could not find the current plan in state to initiate self-correction.");
-                    }
-                } catch (e) {
-                    const error = e as Error;
-                    const errorResult = `Self-Correction mechanism failed: ${error.message || parseApiErrorMessage(e)}`;
-                    fullPlanTrace.push({ event: 'retry_failed', details: errorResult });
-                    dispatch({ type: 'SET_LOADING', payload: false });
-                    return errorResult;
-                }
+                const errorResult = "Plan execution failed at one or more steps. Please review the results and retry.";
+                fullPlanTrace.push({ event: 'plan_failed_execution', details: "One or more steps failed." });
+                dispatch({ type: 'SET_LOADING', payload: false });
+                return errorResult;
             }
             
             const executedStepIds = executableSteps.map(s => s.step_id);
@@ -606,7 +536,7 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined } });
         dispatch({ type: 'SET_LOADING', payload: false });
         return finalResult;
-    }, [handleSendMessageInternal, dispatch, runPythonCode, generateEmbedding, findSimilar, initiateSelfCorrection, state.messages]);
+    }, [handleSendMessageInternal, dispatch, runPythonCode, generateEmbedding, findSimilar, initiateSelfCorrection]);
     
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
@@ -616,6 +546,13 @@ export const useModularOrchestrator = (
         const finalAssistantMsgId = (parseInt(userMsg.id) + 1).toString();
         
         try {
+            if (swarmMode === SwarmMode.TheRoundTable) {
+                const assistantMsg: ChatMessage = { id: finalAssistantMsgId, role: 'assistant', content: 'Starting "The Round Table" debate...', isLoading: true, taskType: TaskType.Creative };
+                dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
+                await runRoundTableDebate(prompt, file, repoUrl, finalAssistantMsgId);
+                return;
+            }
+
             if (swarmMode === SwarmMode.InformalCollaborators) {
                  if (file && (file.type === 'text/csv' || file.type === 'application/json' || file.type === 'text/plain')) {
                     await handleSendMessageInternal(prompt, file, repoUrl, TaskType.DataAnalyst);
@@ -627,57 +564,36 @@ export const useModularOrchestrator = (
                     return;
                 }
                 
-                const agentList = activeRoster.filter(t => t !== TaskType.Reranker).join(', ');
-                const plannerPrompt = `User goal is '${prompt}'. You MUST create a plan using only the following agents: ${agentList}.`;
+                let lessonText = "No past lessons found for this task.";
+                try {
+                    const queryEmbedding = await generateEmbedding(prompt);
+                    const lessons = await findSimilarReflexions(queryEmbedding);
+                    if (lessons.length > 0) {
+                         lessonText = "Review these past lessons before you begin:\n" + lessons.map((l, i) => `[PAST LESSON ${i+1}]:\n- ORIGINAL GOAL: ${l.original_prompt}\n- FAILURE: ${l.critique}\n- SUCCESSFUL FIX: ${l.successful_fix}\n`).join('\n\n');
+                    }
+                } catch (e) { console.error("Failed to find similar reflexions:", e); }
+
+                const agentList = activeRoster.filter(t => !INTERNAL_AGENTS.includes(t)).join(', ');
+                const plannerPrompt = AGENT_ROSTER[TaskType.Planner].systemInstruction.replace('{past_lessons}', lessonText).replace('{goal}', prompt).replace('{agents}', agentList);
+
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
                 
-                let parsedPlan: Plan | undefined;
-                try {
-                    const jsonMatch = planMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-                    if (jsonMatch) {
-                        const planJson = JSON.parse(jsonMatch[0]);
-                        if (planJson.plan && Array.isArray(planJson.plan)) {
-                            parsedPlan = { id: `plan-${planMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
-                        }
-                    }
-                } catch (e) {
-                    console.error("Failed to parse plan from assistant message:", e, "Content:", planMessage.content);
+                const { data: planJson, error } = safeJsonParse(planMessage.content);
+                if (error || !planJson.plan) {
+                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: `I was unable to generate a valid plan. ${error}`, isLoading: false } } });
+                     return;
                 }
-
-                if (parsedPlan) {
-                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { plan: parsedPlan, content: '' } } });
-                    fullPlanTrace.push({ event: 'plan_received', plan: parsedPlan });
-                    const finalResult = await handleExecutePlan(parsedPlan, fullPlanTrace);
-                    
-                    const reportPrompt = `You are a Swarm Evaluator. Here is the full execution trace of a multi-agent swarm. Provide a 'Supervisor's Report' evaluating the swarm's efficiency and logic.\n\nTRACE:\n${JSON.stringify(fullPlanTrace, null, 2)}`;
-                    const reportMsg = await handleSendMessageInternal(reportPrompt, undefined, undefined, TaskType.Critique, false, false);
-                    
-                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
-                } else {
-                    if (planMessage.content && !planMessage.content.includes("I was unable to generate a valid plan")) {
-                        dispatch({
-                            type: 'UPDATE_ASSISTANT_MESSAGE',
-                            payload: {
-                                messageId: planMessage.id,
-                                update: {
-                                    isLoading: false
-                                },
-                            },
-                        });
-                    } else {
-                        dispatch({
-                            type: 'UPDATE_ASSISTANT_MESSAGE',
-                            payload: {
-                                messageId: planMessage.id,
-                                update: {
-                                    content: "I was unable to generate a valid plan for this request. The Planner agent did not return a valid JSON object. Please try rephrasing your goal.",
-                                    isLoading: false,
-                                },
-                            },
-                        });
-                    }
-                }
+                
+                const parsedPlan: Plan = { id: `plan-${planMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { plan: parsedPlan, content: '' } } });
+                fullPlanTrace.push({ event: 'plan_received', plan: parsedPlan });
+                const finalResult = await handleExecutePlan(parsedPlan, fullPlanTrace);
+                
+                const reportPrompt = `You are a Swarm Evaluator. Here is the full execution trace of a multi-agent swarm. Provide a 'Supervisor's Report' evaluating the swarm's efficiency and logic.\n\nTRACE:\n${JSON.stringify(fullPlanTrace, null, 2)}`;
+                const reportMsg = await handleSendMessageInternal(reportPrompt, undefined, undefined, TaskType.Critique, true, false);
+                
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
             } else { // Security Service
                  dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: "Executing Security Service pipeline... (mocked for now)", isLoading: false} } });
             }
@@ -687,7 +603,7 @@ export const useModularOrchestrator = (
         } finally {
             dispatch({ type: 'SET_LOADING', payload: false });
         }
-    }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch]);
+    }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch, addReflexionEntry, findSimilarReflexions, generateEmbedding]);
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
         console.log("handleExecuteCode called (currently handled in plan execution)", messageId, functionCallId);
@@ -696,6 +612,9 @@ export const useModularOrchestrator = (
     const setMessages = useCallback((messages: ChatMessage[]) => {
         dispatch({ type: 'SET_MESSAGES', payload: messages });
     }, [dispatch]);
+    
+    const INTERNAL_AGENTS = [TaskType.Reranker, TaskType.Embedder, TaskType.Verifier, TaskType.Retry];
+
 
     return { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback };
 };

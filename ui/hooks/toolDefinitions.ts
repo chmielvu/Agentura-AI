@@ -1,3 +1,4 @@
+
 import { FunctionDeclaration, Type } from '@google/genai';
 import { TaskType } from '../../types';
 
@@ -10,7 +11,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             route: {
                 type: Type.STRING,
                 description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique), // Critique is internal
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Verifier && t !== TaskType.Reranker && t !== TaskType.Embedder), // Internal agents
             },
             complexity_score: {
                 type: Type.NUMBER,
@@ -18,6 +19,19 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             }
         },
         required: ['route', 'complexity_score'],
+    },
+};
+
+// MANDATE 2.2
+export const AUTONOMOUS_RAG_TOOL: FunctionDeclaration = {
+    name: 'autonomous_rag_tool',
+    description: 'Checks the local, persistent document archive (IndexedDB) for information relevant to a query. Use this FIRST before searching the web.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: { type: Type.STRING, description: 'The semantic query to search the local vector archive with.' },
+        },
+        required: ['query'],
     },
 };
 

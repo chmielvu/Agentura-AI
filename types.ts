@@ -13,14 +13,15 @@ export enum TaskType {
   ManualRAG = 'ManualRAG',
   Meta = 'Meta',
   DataAnalyst = 'DataAnalyst',
-  Reranker = 'Reranker', // NEW: SOTA RAG 2.0 Agent
-  Maintenance = 'Maintenance', // NEW: Self-diagnostic agent
+  Reranker = 'Reranker',
+  Verifier = 'Verifier', // MANDATE 1.2
+  Maintenance = 'Maintenance',
 }
 
-// NEW: Defines the operational mode of the swarm.
 export enum SwarmMode {
   SecurityService = 'Security Service',
   InformalCollaborators = 'Informal Collaborators',
+  TheRoundTable = 'The Round Table', // FEATURE 1
 }
 
 export enum ChatMode {
@@ -43,9 +44,18 @@ export interface RagSource {
   documentName: string;
   chunkContent: string;
   similarityScore?: number;
-  rerankScore?: number; // NEW
+  rerankScore?: number;
 }
 
+// MANDATE 3.1
+export interface ReflexionEntry {
+  id?: number;
+  promptEmbedding: number[]; // For semantic search
+  original_prompt: string;
+  failed_output: string;
+  critique: string;
+  successful_fix: string;
+}
 
 export interface RepoData {
   url:string;
@@ -64,6 +74,8 @@ export interface PlanStep {
   result?: string;
   inputs?: string[];
   output_key?: string;
+  startTime?: number; // v4.3 Operator Overhaul
+  endTime?: number;   // v4.3 Operator Overhaul
 }
 
 export interface Plan {
@@ -123,7 +135,7 @@ export interface ChatMessage {
     response: any;
   };
   critique?: CritiqueResult;
-  supervisorReport?: string; // NEW: For the final swarm evaluation
+  supervisorReport?: string;
   taskType?: TaskType;
   workflowState?: WorkflowState;
   vizSpec?: VizSpec;

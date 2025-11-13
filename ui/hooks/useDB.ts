@@ -1,38 +1,48 @@
 
 import Dexie, { Table } from 'dexie';
+import { DocChunk, ArchiveSummary } from './dbTypes'; // Create dbTypes.ts
+import { ReflexionEntry } from '../../types';
 
-export interface DocChunk {
-    id: string; // Primary key (e.g., "my-file.txt-0")
-    text: string;
-    embedding: number[];
-    source: string; // Indexed source name (e.g., "my-file.txt")
-}
+export * from './dbTypes';
 
-export interface ArchiveSummary {
-    source: string;
-    chunkCount: number;
-}
+// --- LAZY INITIALIZATION TO PREVENT CRASH ON LOAD ---
+let dbInstance: (Dexie & { 
+    chunks: Table<DocChunk, string>;
+    reflexionMemory: Table<ReflexionEntry, number>; // MANDATE 3.1
+}) | null = null;
 
-const getDbInstance = (() => {
-    let dbInstance: any = null;
-    
-    return () => {
-        if (dbInstance) {
-            return dbInstance;
-        }
-        try {
-            const db = new Dexie('AgenturaVectorDB');
-            db.version(1).stores({
-                chunks: 'id, source',
-            });
-            dbInstance = db;
-            return dbInstance;
-        } catch (e) {
-            console.error("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode).", e);
-            throw e;
-        }
-    };
-})();
+const getDbInstance = () => {
+    if (dbInstance) {
+        return dbInstance as Dexie & { chunks: Table<DocChunk, string>, reflexionMemory: Table<ReflexionEntry, number> };
+    }
+    try {
+        const db = new Dexie('AgenturaVectorDB') as Dexie & {
+            chunks: Table<DocChunk, string>;
+            reflexionMemory: Table<ReflexionEntry, number>; // MANDATE 3.1
+        };
+
+        // Schema v1
+        db.version(1).stores({
+            chunks: 'id, source',
+        });
+        
+        // Schema v2 (MANDATE 3.1)
+        db.version(2).stores({
+            chunks: 'id, source',
+            reflexionMemory: '++id', // We will search this via linear scan + cosine similarity
+        }).upgrade(tx => {
+            console.log("Upgrading AgenturaVectorDB to v2, adding reflexionMemory table.");
+            // Migration logic, if any, would go here.
+            return tx.table("reflexionMemory").clear(); // Ensure it's clean on upgrade
+        });
+        
+        dbInstance = db;
+        return dbInstance;
+    } catch (e) {
+        console.error("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode).", e);
+        throw e;
+    }
+};
 
 
 // --- Helper function for client-side vector search ---
@@ -42,9 +52,9 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
     let magA = 0;
     let magB = 0;
     for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        magA += vecA[i] * vecA[i];
-        magB += vecB[i] * vecB[i];
+        dotProduct += (vecA[i] || 0) * (vecB[i] || 0);
+        magA += (vecA[i] || 0) * (vecA[i] || 0);
+        magB += (vecB[i] || 0) * (vecB[i] || 0);
     }
     magA = Math.sqrt(magA);
     magB = Math.sqrt(magB);
@@ -54,14 +64,14 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 // ---------------------------------------------------
 
 export const useDB = () => {
+    const db = getDbInstance();
+
     const addDocument = async (chunk: DocChunk) => {
-        const db = getDbInstance();
         return await db.chunks.put(chunk);
     };
 
     const findSimilar = async (queryVector: number[], topK = 5) => {
         if (!queryVector || queryVector.length === 0) return [];
-        const db = getDbInstance();
         const allChunks = await db.chunks.toArray();
         const scored = allChunks.map(chunk => ({
             ...chunk,
@@ -71,7 +81,6 @@ export const useDB = () => {
     };
 
     const getArchiveSummary = async (): Promise<ArchiveSummary[]> => {
-        const db = getDbInstance();
         const summary = new Map<string, number>();
         await db.chunks.each(chunk => {
             summary.set(chunk.source, (summary.get(chunk.source) || 0) + 1);
@@ -83,22 +92,55 @@ export const useDB = () => {
     };
 
     const deleteSource = async (sourceName: string) => {
-        const db = getDbInstance();
         const chunksToDelete = await db.chunks.where('source').equals(sourceName).primaryKeys();
         return await db.chunks.bulkDelete(chunksToDelete);
     };
 
     const clearArchive = async () => {
-        const db = getDbInstance();
-        return await db.chunks.clear();
+        await db.chunks.clear();
+        await db.reflexionMemory.clear(); // Also clear reflexion memory
     };
 
-    // --- NEW FUNCTION FOR GUIDE MODAL ---
+    // --- NEW FUNCTIONS FOR MANDATES 3.1 & 3.2 ---
+    const addReflexionEntry = async (entry: ReflexionEntry) => {
+        return await db.reflexionMemory.put(entry);
+    };
+
+    const findSimilarReflexions = async (queryEmbedding: number[], topK = 2): Promise<ReflexionEntry[]> => {
+        if (!queryEmbedding || queryEmbedding.length === 0) return [];
+        
+        // Ensure table exists by calling getDbInstance()
+        getDbInstance();
+        
+        const allReflexions = await db.reflexionMemory.toArray();
+        if (allReflexions.length === 0) return [];
+        
+        const scored = allReflexions.map(entry => ({
+            ...entry,
+            similarity: cosineSimilarity(queryEmbedding, entry.promptEmbedding)
+        }));
+        
+        // Filter for only relevant lessons (e.g., similarity > 0.7)
+        return scored
+            .sort((a, b) => b.similarity - a.similarity)
+            .filter(r => r.similarity > 0.7)
+            .slice(0, topK);
+    };
+    
     const getChunksBySourcePrefix = async (prefix: string) => {
-        const db = getDbInstance();
         return await db.chunks.where('source').startsWith(prefix).toArray();
     };
-    // --- END NEW FUNCTION ---
+    // --- END NEW FUNCTIONS ---
 
-    return { addDocument, findSimilar, clearArchive, getArchiveSummary, deleteSource, getChunksBySourcePrefix };
+
+    return { 
+        addDocument, 
+        findSimilar, 
+        clearArchive, 
+        getArchiveSummary, 
+        deleteSource, 
+        getChunksBySourcePrefix,
+        addReflexionEntry,      // MANDATE 3.1
+        findSimilarReflexions,  // MANDATE 3.2
+    };
 };

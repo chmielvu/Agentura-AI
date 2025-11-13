@@ -30,6 +30,7 @@ const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Maintenance]: WrenchScrewdriverIcon,
     [TaskType.Embedder]: BrainCircuitIcon, // Not shown
     [TaskType.Reranker]: BrainCircuitIcon, // Not shown
+    [TaskType.Verifier]: BrainCircuitIcon, // Not shown
 };
 
 const commandsToShow = [

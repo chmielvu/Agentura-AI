@@ -15,22 +15,32 @@ import { GuideModal } from './ui/components/GuideModal';
 import { ExplainAgentModal } from './ui/components/ExplainAgentModal';
 
 const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
+
+// --- UPDATED v4.0 ---
+const INTERNAL_AGENTS = [
+    TaskType.Reranker,
+    TaskType.Embedder,
+    TaskType.Verifier,
+    TaskType.Retry,
+];
 const getInitialActiveRoster = () => {
     const saved = localStorage.getItem('agentic-active-roster');
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            // Basic validation to ensure it's an array of strings
             if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) {
-                return parsed as TaskType[];
+                // Filter out any internal agents that might have been saved by mistake
+                return (parsed as TaskType[]).filter(t => !INTERNAL_AGENTS.includes(t));
             }
         } catch (e) {
             console.error("Failed to parse saved roster:", e);
         }
     }
-    // Default roster if nothing saved or parsing fails
-    return Object.values(TaskType).filter(t => t !== TaskType.Reranker && t !== TaskType.Embedder);
+    // Default roster, filtered
+    return Object.values(TaskType).filter(t => !INTERNAL_AGENTS.includes(t));
 };
+// --- END UPDATE ---
+
 const gitHubRepoRegex = /https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/;
 
 const App: React.FC = () => {

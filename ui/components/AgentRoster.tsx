@@ -11,14 +11,13 @@ import {
     BrainCircuitIcon,
     ImageIcon,
     SparklesIcon,
-    RetryIcon,
     DocumentTextIcon,
     OptimizeIcon,
     ChartBarIcon,
-    WrenchScrewdriverIcon, // NEW
+    WrenchScrewdriverIcon,
 } from '../../components/Icons';
 
-const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
+export const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Planner]: PlanIcon,
     [TaskType.Research]: SearchIcon,
     [TaskType.Code]: CodeBracketIcon,
@@ -27,16 +26,25 @@ const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Complex]: BrainCircuitIcon,
     [TaskType.Vision]: ImageIcon,
     [TaskType.Creative]: SparklesIcon,
-    [TaskType.Retry]: RetryIcon,
+    [TaskType.Retry]: BrainCircuitIcon, // Internal
     [TaskType.ManualRAG]: DocumentTextIcon,
     [TaskType.Meta]: OptimizeIcon,
     [TaskType.DataAnalyst]: ChartBarIcon,
-    [TaskType.Maintenance]: WrenchScrewdriverIcon, // NEW
-    [TaskType.Embedder]: BrainCircuitIcon, // Should not be visible
-    [TaskType.Reranker]: BrainCircuitIcon, // Should not be visible
+    [TaskType.Maintenance]: WrenchScrewdriverIcon,
+    [TaskType.Embedder]: BrainCircuitIcon, // Internal
+    [TaskType.Reranker]: BrainCircuitIcon, // Internal
+    [TaskType.Verifier]: BrainCircuitIcon, // Internal
 };
 
 const SECURITY_SERVICE_ROSTER = [TaskType.Planner, TaskType.Research, TaskType.Code, TaskType.Critique];
+
+// --- Internal agents to hide from UI ---
+const INTERNAL_AGENTS = [
+    TaskType.Reranker,
+    TaskType.Embedder,
+    TaskType.Verifier,
+    TaskType.Retry,
+];
 
 interface AgentRosterProps {
     swarmMode: SwarmMode;
@@ -49,15 +57,21 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
     const isInformalMode = swarmMode === SwarmMode.InformalCollaborators;
 
     const rosterToDisplay = useMemo(() => {
-        return isInformalMode ? activeRoster : SECURITY_SERVICE_ROSTER;
-    }, [isInformalMode, activeRoster]);
+        const allAgents = Object.values(TaskType).filter(t => !INTERNAL_AGENTS.includes(t));
+        return isInformalMode ? allAgents : SECURITY_SERVICE_ROSTER;
+    }, [isInformalMode]);
+    
+    const activeRosterSet = useMemo(() => new Set(activeRoster), [activeRoster]);
 
     const handleToggle = (taskType: TaskType) => {
         if (!isInformalMode) return;
-        const newRoster = activeRoster.includes(taskType)
-            ? activeRoster.filter(t => t !== taskType)
-            : [...activeRoster, taskType];
-        onRosterChange(newRoster);
+        const newRoster = new Set(activeRoster);
+        if (newRoster.has(taskType)) {
+            newRoster.delete(taskType);
+        } else {
+            newRoster.add(taskType);
+        }
+        onRosterChange(Array.from(newRoster));
     };
 
     return (
@@ -69,10 +83,11 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
             </p>
             <ul className="space-y-3">
                 {Object.entries(AGENT_ROSTER).map(([taskType, agent]) => {
-                    // Hide internal "worker" agents from the UI
-                    if (taskType === TaskType.Reranker || taskType === TaskType.Embedder) return null;
+                    // Hide internal agents from the roster
+                    if (INTERNAL_AGENTS.includes(taskType as TaskType)) return null;
 
                     const isEnabled = rosterToDisplay.includes(taskType as TaskType);
+                    const isActive = activeRosterSet.has(taskType as TaskType);
                     const Icon = taskToIcon[taskType as TaskType] || BrainCircuitIcon;
 
                     return (
@@ -98,18 +113,18 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
                             {isInformalMode && (
                                <button
                                     onClick={() => handleToggle(taskType as TaskType)}
-                                    aria-pressed={isEnabled}
+                                    aria-pressed={isActive}
                                     className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full ml-2"
                                 >
                                     <div
                                         className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                                            isEnabled
+                                            isActive
                                             ? 'bg-green-500 animate-led-pulse'
                                             : 'bg-red-900/70 border border-black/20'
                                         }`}
                                         style={{
-                                            '--led-glow-color': isEnabled ? 'rgba(74, 222, 128, 0.6)' : 'transparent',
-                                            boxShadow: isEnabled ? '0 0 4px 1px rgba(74, 222, 128, 0.5)' : 'inset 0 0 2px 0px black',
+                                            '--led-glow-color': isActive ? 'rgba(74, 222, 128, 0.6)' : 'transparent',
+                                            boxShadow: isActive ? '0 0 4px 1px rgba(74, 222, 128, 0.5)' : 'inset 0 0 2px 0px black',
                                         } as React.CSSProperties}
                                     />
                                 </button>

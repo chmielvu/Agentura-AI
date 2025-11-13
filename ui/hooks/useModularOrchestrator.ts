@@ -186,14 +186,17 @@ export const useModularOrchestrator = (
     }, [dispatch]);
 
     const runPythonCode = async (code: string): Promise<{ success: boolean; output: string; error?: string }> => {
-        if (!pyodideRef.current) return { success: false, output: "", error: "Pyodide is not initialized."};
+        if (!pyodideRef.current) {
+            return { success: false, output: "", error: "Pyodide is not initialized." };
+        }
         try {
           pyodideRef.current.runPython(`import sys, io; sys.stdout = io.StringIO()`);
           const result = await pyodideRef.current.runPythonAsync(code);
           const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
           return { success: true, output: stdout || result?.toString() || "Code executed without output." };
-        } catch (err: any) { 
-            return { success: false, output: "", error: err.message };
+        } catch (e) {
+            const error = e as Error;
+            return { success: false, output: "", error: error.message };
         }
     };
     
@@ -233,9 +236,80 @@ export const useModularOrchestrator = (
         return { fullText, sources, functionCalls };
     }, [dispatch]);
     
+    // SOTA RAG 2.0: Retrieve-Rerank-Synthesize Pipeline
+    const runRerankPipeline = async (prompt: string, assistantMsgId: string) => {
+        let ragSources: RagSource[] = [];
+        
+        try {
+            // 1. RETRIEVE
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Retrieving relevant documents from archive..."} } });
+            const queryVector = await generateEmbedding(prompt);
+            const similarChunks = await findSimilar(queryVector, 10); // Retrieve more chunks (e.g., 10) for reranking
+
+            if (similarChunks.length === 0) {
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "I couldn't find any relevant documents in your archive for this query."} } });
+                return; // Stop pipeline
+            }
+
+            ragSources = similarChunks.map(c => ({
+                documentName: c.source,
+                chunkContent: c.text,
+                similarityScore: c.similarity
+            }));
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { ragSources } } });
+
+            // 2. RERANK
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Reranking retrieved documents for relevance..."} } });
+            const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction
+                .replace('{query}', prompt)
+                .replace('{chunks_json}', JSON.stringify(ragSources.map(r => ({ documentName: r.documentName, chunkContent: r.chunkContent }))));
+            
+            const rerankMsg = await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false);
+            
+            let rerankedSources: RagSource[] = [];
+            try {
+                const jsonMatch = rerankMsg.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    if (parsed.reranked_chunks) {
+                        rerankedSources = parsed.reranked_chunks
+                            .map((c: any) => ({
+                                documentName: c.documentName,
+                                chunkContent: c.chunkContent,
+                                rerankScore: c.rerankScore,
+                            }))
+                            .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
+                            .slice(0, 5); // Take top 5 reranked
+                    }
+                }
+            } catch (e) {
+                console.error("Reranker failed to return valid JSON:", e);
+                rerankedSources = ragSources.slice(0, 5); // Fallback to vector search
+            }
+            
+            ragSources = rerankedSources.length > 0 ? rerankedSources : ragSources.slice(0, 5);
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { ragSources } } });
+
+            // 3. SYNTHESIZE
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: "Synthesizing answer from reranked documents..."} } });
+            let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE (Reranked) ---\n";
+            ragContext += ragSources
+                .map(c => `[Source: ${c.documentName} (Score: ${c.rerankScore?.toFixed(2) || 'N/A'})]\n${c.chunkContent}\n`)
+                .join('---\n');
+            const finalPrompt = `${ragContext}\n\nUser Query: ${prompt}`;
+
+            const synthMsg = await handleSendMessageInternal(finalPrompt, undefined, undefined, TaskType.Chat, true, false);
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { content: synthMsg.content, isLoading: false } } });
+
+        } catch (e) {
+            console.error("RAG pipeline failed:", e);
+            handleApiError(e, assistantMsgId, true);
+        }
+    };
+
     const handleSendMessageInternal = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType, isPlanStep: boolean = false, manageLoadingState: boolean = true, onStreamUpdate?: (streamedText: string) => void): Promise<ChatMessage> => {
         return new Promise(async (resolve, reject) => {
-            const assistantMsgId = Date.now().toString();
+            const assistantMsgId = isPlanStep ? `step-${Date.now()}` : Date.now().toString();
             let routedTask = forcedTask;
             let finalPrompt = prompt;
             
@@ -245,47 +319,27 @@ export const useModularOrchestrator = (
                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: TaskType.Chat, workflowState: initialWorkflow };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
 
-                    const routerHistory = state.messages.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
+                    const routerHistory = state.messages.slice(-5).map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, parts: [{ text: m.content }] }));
                     const routerResp = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [...routerHistory, { role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: { parts: [{ text: ROUTER_SYSTEM_INSTRUCTION }] }, tools: [{ functionDeclarations: [ROUTER_TOOL] }] }});
                     const proposedRoute = routerResp.functionCalls?.[0]?.args.route as string | undefined;
 
-                    // FIX: Validate the routed task to ensure it exists, otherwise default to Chat.
                     if (proposedRoute && AGENT_ROSTER.hasOwnProperty(proposedRoute)) {
                         routedTask = proposedRoute as TaskType;
                     } else {
                         routedTask = TaskType.Chat;
                     }
-                } else {
-                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: `Executing: ${prompt}`, isLoading: true, taskType: routedTask };
+                } else if (!isPlanStep) {
+                     const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isLoading: true, taskType: routedTask };
                     dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: assistantMsg } });
                 }
-
+                
                 if (file?.type.startsWith('image/')) routedTask = TaskType.Vision;
                 
-                let ragSources: RagSource[] = [];
-                if (routedTask === TaskType.ManualRAG) {
-                    try {
-                        const queryVector = await generateEmbedding(prompt);
-                        const similarChunks = await findSimilar(queryVector);
-
-                        if (similarChunks.length > 0) {
-                            let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE ---\n";
-                            ragSources = similarChunks.map(c => ({
-                                documentName: c.source,
-                                chunkContent: c.text,
-                                similarityScore: c.similarity
-                            }));
-
-                            ragContext += ragSources
-                                .map(c => `[Source: ${c.documentName}]\n${c.chunkContent}\n`)
-                                .join('---\n');
-
-                            finalPrompt = `${ragContext}\n\nUser Query: ${prompt}`;
-                        }
-                    } catch (e) {
-                        console.error("Client-side RAG failed:", e);
-                        // Failsafe: just send the original prompt
-                    }
+                if (routedTask === TaskType.ManualRAG && !isPlanStep) {
+                    await runRerankPipeline(prompt, assistantMsgId);
+                    const finalMessage = state.messages.find(m => m.id === assistantMsgId) || state.messages[state.messages.length - 1];
+                    resolve(finalMessage); 
+                    return;
                 }
 
                 const agentConfig = AGENT_ROSTER[routedTask];
@@ -294,7 +348,7 @@ export const useModularOrchestrator = (
                 if (graphConfig) {
                     graphConfig.nodes.forEach(node => { workflowState[`node-${node.id}`] = { status: 'pending' }; });
                 }
-                if(workflowState['node-1']) {
+                if(workflowState['node-1'] && !isPlanStep) {
                     workflowState['node-1'] = { status: 'completed', endTime: Date.now(), details: { routed_to: routedTask } };
                     workflowState['node-2'] = { status: 'running', startTime: Date.now() };
                 }
@@ -309,32 +363,28 @@ export const useModularOrchestrator = (
                 const stream = await chat.sendMessageStream({ message: { role: 'user', parts } });
                 const streamOutput = await processStream(stream, assistantMsgId, onStreamUpdate);
                 
-                updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
+                if (workflowState['node-2'] && !isPlanStep) {
+                    updateWorkflowState(assistantMsgId, 2, { status: 'completed', details: { output: streamOutput.fullText.substring(0, 200) + '...' } });
+                }
                 
-                // --- SOTA ENHANCEMENT: Parse VizSpec ---
                 let vizSpec: VizSpec | undefined = undefined;
                 if (routedTask === TaskType.DataAnalyst) {
                     try {
-                        // Attempt to extract JSON from a string that might have leading/trailing text
                         const jsonMatch = streamOutput.fullText.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
                         if (jsonMatch) {
                             const parsedJson = JSON.parse(jsonMatch[0]);
-                             // Basic validation
                             if (parsedJson.type && parsedJson.data && parsedJson.dataKey && parsedJson.categoryKey) {
                                 vizSpec = parsedJson;
-                                // Hide the raw JSON from the chat message for a cleaner UI
                                 streamOutput.fullText = "Here is the data visualization you requested:";
                             }
                         }
                     } catch (e) {
                         console.error("Failed to parse VizSpec JSON:", e);
-                        // If parsing fails, just show the raw text as an error
                         streamOutput.fullText = `[DataAnalyst Error: Failed to generate valid VizSpec JSON]\n\n${streamOutput.fullText}`;
                     }
                 }
-                // --- End SOTA Enhancement ---
 
-                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, ragSources, vizSpec, content: streamOutput.fullText } } });
+                dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: assistantMsgId, update: { isLoading: false, vizSpec, content: streamOutput.fullText } } });
 
                 const finalMessage: ChatMessage = { 
                     id: assistantMsgId, 
@@ -343,85 +393,88 @@ export const useModularOrchestrator = (
                     isLoading: false, 
                     sources: streamOutput.sources, 
                     functionCalls: streamOutput.functionCalls, 
-                    ragSources,
-                    vizSpec // Add the parsed spec to the message
+                    ragSources: [],
+                    vizSpec
                 };
                 resolve(finalMessage);
 
-            } catch(e: any) {
+            } catch(e) {
                 handleApiError(e, assistantMsgId, manageLoadingState);
                 reject(e);
             }
         });
     }, [state.messages, ai, persona, processStream, dispatch, handleApiError, getChat, sessionFeedback, findSimilar, generateEmbedding, updateWorkflowState]);
 
-    const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
+    const initiateSelfCorrection = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<Plan> => {
         const failedStep = plan.plan.find(p => p.status === 'failed');
+        if (!failedStep) {
+            throw new Error("Self-correction called without a failed step.");
+        }
     
-        if (failedStep) {
-            // --- THIS IS THE REFLEXION LOOP (RETRY) ---
-            dispatch({ type: 'SET_LOADING', payload: true });
-            fullPlanTrace.push({ event: 'retry_initiated', step: failedStep.step_id });
+        fullPlanTrace.push({ event: 'self_correction_initiated', step: failedStep.step_id });
     
-            const original_prompt = failedStep.description;
-            const failed_output = failedStep.result || 'No error output.';
-            const critique = `This step failed with the following error: ${failed_output}`;
-            const apoPrompt = `[Prompt]: ${original_prompt}\n[Failed Output]: ${failed_output}\n[Critique]: ${critique}`;
+        const original_prompt = failedStep.description;
+        const failed_output = failedStep.result || 'No error output.';
+        const critique = `This plan step failed with the following error: ${failed_output}`;
+        const apoPrompt = `[Prompt]: ${original_prompt}\n[Failed Output]: ${failed_output}\n[Critique]: ${critique}`;
     
-            try {
-                const retryMessage = await handleSendMessageInternal(
-                    apoPrompt, undefined, undefined, TaskType.Retry, true, false
-                );
+        // 1. Call Retry Agent to get a new goal for the planner
+        const retryMessage = await handleSendMessageInternal(apoPrompt, undefined, undefined, TaskType.Retry, true, false);
+        const newPlannerGoal = retryMessage.content;
+        fullPlanTrace.push({ event: 'apo_success', new_goal: newPlannerGoal });
     
-                const newPlannerGoal = retryMessage.content;
-                fullPlanTrace.push({ event: 'apo_success', new_goal: newPlannerGoal });
+        // 2. Call Planner with the new, corrected goal
+        const newPlanMessage = await handleSendMessageInternal(newPlannerGoal, undefined, undefined, TaskType.Planner, false, false);
     
-                const newPlanMessage = await handleSendMessageInternal(
-                    newPlannerGoal, undefined, undefined, TaskType.Planner, false, false
-                );
-    
-                let parsedPlan: Plan | undefined;
-                try {
-                    const jsonMatch = newPlanMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-                    if (jsonMatch) {
-                        const planJson = JSON.parse(jsonMatch[0]);
-                        if (planJson.plan && Array.isArray(planJson.plan)) {
-                            parsedPlan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
-                        }
-                    }
-                } catch (e) {
-                     console.error("Failed to parse new plan from retry message:", e, "Content:", newPlanMessage.content);
+        // 3. Parse and return the new plan
+        let parsedPlan: Plan | undefined;
+        try {
+            const jsonMatch = newPlanMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+            if (jsonMatch) {
+                const planJson = JSON.parse(jsonMatch[0]);
+                if (planJson.plan && Array.isArray(planJson.plan)) {
+                    parsedPlan = { id: `plan-${newPlanMessage.id}`, plan: planJson.plan.map((step: any) => ({ ...step, status: 'pending' })) };
                 }
+            }
+        } catch (e) {
+            console.error("Failed to parse new plan from retry message:", e, "Content:", newPlanMessage.content);
+        }
 
-                if (parsedPlan) {
-                    dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
-                    fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
-                    return await handleExecutePlan(parsedPlan, fullPlanTrace);
-                } else {
-                    throw new Error("Self-correction (Reflexion) failed to generate a new plan.");
-                }
-    
+        if (parsedPlan) {
+            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: newPlanMessage.id, update: { plan: parsedPlan, content: '' } } });
+            fullPlanTrace.push({ event: 'new_plan_generated', plan: parsedPlan });
+            return parsedPlan;
+        } else {
+            throw new Error("Self-correction (Reflexion) failed to generate a new, valid plan.");
+        }
+    }, [handleSendMessageInternal, dispatch]);
+
+    const handleExecutePlan = useCallback(async (plan: Plan, fullPlanTrace: any[]): Promise<string> => {
+        // This handles manual retries from the UI button.
+        const manualRetryStep = plan.plan.find(p => p.status === 'failed');
+        if (manualRetryStep) {
+            try {
+                dispatch({ type: 'SET_LOADING', payload: true });
+                const newPlan = await initiateSelfCorrection(plan, fullPlanTrace);
+                return await handleExecutePlan(newPlan, fullPlanTrace); // Recursive call with new plan
             } catch (e) {
-                const errorResult = `Self-Correction Error: ${parseApiErrorMessage(e)}`;
+                const error = e as Error;
+                const errorResult = `Self-Correction Error: ${error.message || parseApiErrorMessage(e)}`;
                 fullPlanTrace.push({ event: 'retry_failed', details: errorResult });
                 return errorResult;
             } finally {
-                dispatch({ type: 'SET_LOADING', payload: false });
+                 dispatch({ type: 'SET_LOADING', payload: false });
             }
         }
 
-        // --- THIS IS THE STANDARD (NON-RETRY) EXECUTION ---
         dispatch({ type: 'SET_LOADING', payload: true });
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: plan.id } });
     
         const planState: Record<string, any> = {};
-        
-        let pendingSteps = plan.plan.filter(step => step.status === 'pending' || step.status === 'failed');
+        let pendingSteps = plan.plan.filter(step => step.status === 'pending');
         
         while (pendingSteps.length > 0) {
-            const executableSteps = pendingSteps.filter(step => 
-                !step.inputs || step.inputs.every(inputKey => planState.hasOwnProperty(inputKey))
-            );
+            const executableSteps = pendingSteps.filter(step => !step.inputs || step.inputs.every(inputKey => planState.hasOwnProperty(inputKey)));
     
             if (executableSteps.length === 0) {
                 const errorResult = "Plan stalled due to missing dependencies.";
@@ -435,68 +488,76 @@ export const useModularOrchestrator = (
             });
     
             const stepPromises = executableSteps.map(async step => {
-                // FIX: Validate that the tool specified in the plan exists before trying to run it.
-                const toolName = step.tool_to_use;
+                const toolName = step.tool_to_use as TaskType;
                 if (!AGENT_ROSTER.hasOwnProperty(toolName)) {
-                    throw new Error(`Plan referenced an unknown agent: '${toolName}'. Step failed.`);
+                    throw new Error(`Plan referenced an unknown agent: '${toolName}'.`);
                 }
                 
                 let stepDescription = step.description;
                 if (step.inputs) {
                     for (const key of step.inputs) {
-                        stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), planState[key] || '');
+                        const inputData = planState[key] || '';
+                        stepDescription = stepDescription.replace(new RegExp(`\\{${key}\\}`, 'g'), typeof inputData === 'string' ? inputData : JSON.stringify(inputData));
                     }
                 }
 
-                // --- START STREAMING REFINEMENT ---
+                if (toolName === TaskType.ManualRAG) {
+                    const queryVector = await generateEmbedding(stepDescription);
+                    const similarChunks = await findSimilar(queryVector, 10);
+                    const ragSources = similarChunks.map(c => ({ documentName: c.source, chunkContent: c.text, similarityScore: c.similarity }));
+                    return { step, resultMessage: { content: JSON.stringify(ragSources), id: '' } };
+                }
+                
+                if (toolName === TaskType.Reranker) {
+                    const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction
+                        .replace('{query}', stepDescription)
+                        .replace('{chunks_json}', planState[step.inputs![0]]);
+                    
+                    return { step, resultMessage: await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false) };
+                }
+                
+                if (toolName === TaskType.Chat && step.inputs?.includes(step.output_key)) {
+                    let rerankedSources: RagSource[] = [];
+                    try {
+                        const parsed = JSON.parse(planState[step.inputs![0]]);
+                        const chunks = parsed.reranked_chunks || parsed; // Handle both direct array and object
+                        rerankedSources = chunks
+                            .map((c: any) => ({ documentName: c.documentName, chunkContent: c.chunkContent, rerankScore: c.rerankScore }))
+                            .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
+                            .slice(0, 5);
+                    } catch (e) { console.error("Reranker step failed to provide valid JSON for synthesizer", e); }
+                    
+                    let ragContext = "--- RELEVANT CONTEXT FROM YOUR ARCHIVE (Reranked) ---\n";
+                    ragContext += rerankedSources
+                        .map(c => `[Source: ${c.documentName} (Score: ${c.rerankScore?.toFixed(2) || 'N/A'})]\n${c.chunkContent}\n`)
+                        .join('---\n');
+                    stepDescription = `${ragContext}\n\nUser Query: ${stepDescription}`;
+                }
+
                 const resultMessage = await handleSendMessageInternal(
-                    stepDescription, 
-                    undefined, 
-                    undefined, 
-                    toolName as TaskType, 
-                    true, 
-                    false,
+                    stepDescription, undefined, undefined, toolName, true, false,
                     (streamedText) => {
-                        // This callback streams real-time updates to the UI
-                        dispatch({ 
-                            type: 'UPDATE_PLAN_STEP', 
-                            payload: { 
-                                planId: plan.id, 
-                                stepId: step.step_id, 
-                                status: 'in-progress', 
-                                result: streamedText + ' |' // Add cursor
-                            } 
-                        });
+                        dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: streamedText + ' |'} });
                     }
                 );
-                // --- END STREAMING REFINEMENT ---
                 return { step, resultMessage };
             });
     
             const results = await Promise.allSettled(stepPromises);
-            
+            let aStepFailedInThisBatch = false;
+
             for (const result of results) {
                 if (result.status === 'fulfilled') {
                     const { step, resultMessage } = result.value;
                     let outputData = resultMessage.content;
 
-                    // FIX: Check for and execute 'code_interpreter' function calls.
                     const codeCall = resultMessage.functionCalls?.find(fc => fc.name === 'code_interpreter');
                     if (codeCall && codeCall.args.code) {
                         const codeResult = await runPythonCode(codeCall.args.code);
                         outputData = codeResult.success ? codeResult.output : `Execution Failed: ${codeResult.error}`;
-                        dispatch({
-                            type: 'UPDATE_ASSISTANT_MESSAGE',
-                            payload: {
-                                messageId: resultMessage.id,
-                                update: {
-                                    content: `Code execution result:\n${outputData}`,
-                                    functionCalls: resultMessage.functionCalls.map(fc => 
-                                        fc.id === codeCall.id ? {...fc, isAwaitingExecution: false} : fc
-                                    )
-                                }
-                            }
-                        });
+                        if (resultMessage.id) {
+                            dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: resultMessage.id, update: { content: `Code execution result:\n${outputData}`, functionCalls: resultMessage.functionCalls.map(fc => fc.id === codeCall.id ? {...fc, isAwaitingExecution: false} : fc) }}});
+                        }
                     }
 
                     if (step.output_key) {
@@ -504,14 +565,33 @@ export const useModularOrchestrator = (
                     }
                     dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'completed', result: outputData } });
                     fullPlanTrace.push({ event: 'step_completed', step: step.step_id, result: outputData });
-                } else {
-                    const errorResult = `Step failed: ${parseApiErrorMessage(result.reason)}`;
-                    fullPlanTrace.push({ event: 'plan_failed', details: errorResult });
-                    // Fail the specific step in the UI
+                } else { // 'rejected'
+                    aStepFailedInThisBatch = true;
+                    const errorReason = result.reason as any;
+                    const errorResult = `Step failed: ${errorReason.message || parseApiErrorMessage(result.reason)}`;
+                    fullPlanTrace.push({ event: 'step_failed', details: errorResult });
+                    // Find the step that corresponds to this failed promise
                     const failedStep = executableSteps[results.indexOf(result)];
                     if (failedStep) {
                         dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: failedStep.step_id, status: 'failed', result: errorResult } });
                     }
+                }
+            }
+            
+            if (aStepFailedInThisBatch) {
+                // Autonomous self-correction is triggered
+                try {
+                    const currentMessage = state.messages.find(msg => msg.plan?.id === plan.id);
+                    if (currentMessage && currentMessage.plan) {
+                        const newPlan = await initiateSelfCorrection(currentMessage.plan, fullPlanTrace);
+                        return await handleExecutePlan(newPlan, fullPlanTrace); // Recursive call with the new corrected plan
+                    } else {
+                        throw new Error("Could not find the current plan in state to initiate self-correction.");
+                    }
+                } catch (e) {
+                    const error = e as Error;
+                    const errorResult = `Self-Correction mechanism failed: ${error.message || parseApiErrorMessage(e)}`;
+                    fullPlanTrace.push({ event: 'retry_failed', details: errorResult });
                     dispatch({ type: 'SET_LOADING', payload: false });
                     return errorResult;
                 }
@@ -526,7 +606,7 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined } });
         dispatch({ type: 'SET_LOADING', payload: false });
         return finalResult;
-    }, [handleSendMessageInternal, dispatch, runPythonCode]);
+    }, [handleSendMessageInternal, dispatch, runPythonCode, generateEmbedding, findSimilar, initiateSelfCorrection, state.messages]);
     
     const handleSendMessage = useCallback(async (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: prompt, file };
@@ -537,25 +617,23 @@ export const useModularOrchestrator = (
         
         try {
             if (swarmMode === SwarmMode.InformalCollaborators) {
-                 // --- SOTA Enhancement: If a data file is attached, route directly to DataAnalyst ---
-                if (file && (file.type === 'text/csv' || file.type === 'application/json' || file.type === 'text/plain')) {
+                 if (file && (file.type === 'text/csv' || file.type === 'application/json' || file.type === 'text/plain')) {
                     await handleSendMessageInternal(prompt, file, repoUrl, TaskType.DataAnalyst);
                     return;
                 }
                 
-                // --- SOTA Enhancement: If no specific task, but a forced task is provided (e.g., command palette) ---
                 if (forcedTask) {
                     await handleSendMessageInternal(prompt, file, repoUrl, forcedTask);
                     return;
                 }
-
-                const plannerPrompt = `User goal is '${prompt}'. You MUST create a plan using only the following agents: ${activeRoster.join(', ')}.`;
+                
+                const agentList = activeRoster.filter(t => t !== TaskType.Reranker).join(', ');
+                const plannerPrompt = `User goal is '${prompt}'. You MUST create a plan using only the following agents: ${agentList}.`;
                 fullPlanTrace.push({ event: 'invoke_planner', prompt: plannerPrompt });
                 const planMessage = await handleSendMessageInternal(plannerPrompt, file, repoUrl, TaskType.Planner, false, false);
                 
                 let parsedPlan: Plan | undefined;
                 try {
-                    // Attempt to extract JSON from a string that might have leading/trailing text
                     const jsonMatch = planMessage.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
                     if (jsonMatch) {
                         const planJson = JSON.parse(jsonMatch[0]);
@@ -577,19 +655,17 @@ export const useModularOrchestrator = (
                     
                     dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: planMessage.id, update: { content: finalResult, supervisorReport: reportMsg.content, isLoading: false } } });
                 } else {
-                    // FIX: Gracefully handle planner failure OR non-plan responses
-                    // If the planner couldn't make a plan, it might just answer directly. We pass that through.
                     if (planMessage.content && !planMessage.content.includes("I was unable to generate a valid plan")) {
                         dispatch({
                             type: 'UPDATE_ASSISTANT_MESSAGE',
                             payload: {
                                 messageId: planMessage.id,
                                 update: {
-                                    isLoading: false // The message is already updated with content, just stop loading
+                                    isLoading: false
                                 },
                             },
                         });
-                    } else { // It explicitly failed or returned an empty plan
+                    } else {
                         dispatch({
                             type: 'UPDATE_ASSISTANT_MESSAGE',
                             payload: {
@@ -606,7 +682,6 @@ export const useModularOrchestrator = (
                  dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: "Executing Security Service pipeline... (mocked for now)", isLoading: false} } });
             }
         } catch (e) {
-            // This catch is for errors *before* an assistant message is created, like the router failing.
             const errorMsg = parseApiErrorMessage(e);
              dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { assistantMessage: {id: finalAssistantMsgId, role: 'assistant', content: `Swarm execution failed: ${errorMsg}`, isLoading: false} } });
         } finally {
@@ -615,8 +690,6 @@ export const useModularOrchestrator = (
     }, [swarmMode, activeRoster, handleSendMessageInternal, handleExecutePlan, dispatch]);
 
     const handleExecuteCode = useCallback(async (messageId: string, functionCallId: string, codeOverride?: string) => {
-        // This function is currently stubbed, as its execution is handled within the plan loop.
-        // This stub is left for potential future features e.g. "run this one function call again".
         console.log("handleExecuteCode called (currently handled in plan execution)", messageId, functionCallId);
     }, []);
 

@@ -13,32 +13,26 @@ export interface ArchiveSummary {
     chunkCount: number;
 }
 
-// --- LAZY INITIALIZATION TO PREVENT CRASH ON LOAD ---
-let dbInstance: (Dexie & { chunks: Table<DocChunk, string> }) | null = null;
-
-const getDbInstance = () => {
-    if (dbInstance) {
-        return dbInstance;
-    }
-    // This try-catch is crucial. If IndexedDB is disabled (e.g., private browsing),
-    // instantiating Dexie will throw an error. By catching it here, we prevent a
-    // top-level uncaught exception that would crash the entire application on load.
-    try {
-        const db = new Dexie('AgenturaVectorDB') as Dexie & {
-            chunks: Table<DocChunk, string>;
-        };
-
-        db.version(1).stores({
-            chunks: 'id, source',
-        });
-        dbInstance = db;
-        return dbInstance;
-    } catch (e) {
-        console.error("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode).", e);
-        // Let the calling function handle the error.
-        throw e;
-    }
-};
+const getDbInstance = (() => {
+    let dbInstance: any = null;
+    
+    return () => {
+        if (dbInstance) {
+            return dbInstance;
+        }
+        try {
+            const db = new Dexie('AgenturaVectorDB');
+            db.version(1).stores({
+                chunks: 'id, source',
+            });
+            dbInstance = db;
+            return dbInstance;
+        } catch (e) {
+            console.error("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode).", e);
+            throw e;
+        }
+    };
+})();
 
 
 // --- Helper function for client-side vector search ---

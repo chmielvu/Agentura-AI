@@ -126,9 +126,10 @@ const DebuggerModal: React.FC<{
         await pyodide.runPythonAsync(PYTHON_DEBUGGER_SCRIPT);
         await pyodide.globals.get('debugger_instance').run_debug(code);
         setState(prev => ({ ...prev, status: 'finished' }));
-      } catch (e: any) {
+      } catch (e) {
+        const error = e as Error;
         console.error("Debugger execution failed:", e);
-        const errorMessage = `\n\nDEBUGGER FAILED: ${e.message}`;
+        const errorMessage = `\n\nDEBUGGER FAILED: ${error.message}`;
         fullOutput.current += errorMessage;
         setState(prev => ({ ...prev, output: prev.output + errorMessage, status: 'error' }));
       }

@@ -11,8 +11,10 @@ export enum TaskType {
   Retry = 'Retry',
   Embedder = 'Embedder',
   ManualRAG = 'ManualRAG',
-  Meta = 'Meta', // NEW: For the agent that creates other agents
-  DataAnalyst = 'DataAnalyst', // NEW: For data analysis and visualization
+  Meta = 'Meta',
+  DataAnalyst = 'DataAnalyst',
+  Reranker = 'Reranker', // NEW: SOTA RAG 2.0 Agent
+  Maintenance = 'Maintenance', // NEW: Self-diagnostic agent
 }
 
 // NEW: Defines the operational mode of the swarm.
@@ -41,6 +43,7 @@ export interface RagSource {
   documentName: string;
   chunkContent: string;
   similarityScore?: number;
+  rerankScore?: number; // NEW
 }
 
 

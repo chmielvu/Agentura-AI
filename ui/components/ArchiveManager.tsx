@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useDB, ArchiveSummary } from '../hooks/useDB';
 
@@ -11,7 +12,7 @@ export const ArchiveManager: React.FC = () => {
         try {
             const s = await getArchiveSummary();
             setSummary(s);
-        } catch (e: any) {
+        } catch (e) {
             console.error("Failed to refresh archive summary:", e);
             setError("Could not access the document archive. This can happen if IndexedDB is disabled in your browser (e.g., in private browsing mode).");
             setSummary([]);
@@ -27,7 +28,7 @@ export const ArchiveManager: React.FC = () => {
             try {
                 await deleteSource(sourceName);
                 refreshSummary();
-            } catch (e: any) {
+            } catch (e) {
                 console.error(`Failed to delete source ${sourceName}:`, e);
                 setError("Failed to delete the document.");
             }
@@ -39,7 +40,7 @@ export const ArchiveManager: React.FC = () => {
             try {
                 await clearArchive();
                 refreshSummary();
-            } catch (e: any) {
+            } catch (e) {
                 console.error("Failed to clear archive:", e);
                 setError("Failed to clear the archive.");
             }

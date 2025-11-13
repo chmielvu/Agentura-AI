@@ -15,12 +15,28 @@ import { GuideModal } from './ui/components/GuideModal';
 import { ExplainAgentModal } from './ui/components/ExplainAgentModal';
 
 const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
+const getInitialActiveRoster = () => {
+    const saved = localStorage.getItem('agentic-active-roster');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            // Basic validation to ensure it's an array of strings
+            if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) {
+                return parsed as TaskType[];
+            }
+        } catch (e) {
+            console.error("Failed to parse saved roster:", e);
+        }
+    }
+    // Default roster if nothing saved or parsing fails
+    return Object.values(TaskType).filter(t => t !== TaskType.Reranker && t !== TaskType.Embedder);
+};
 const gitHubRepoRegex = /https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/;
 
 const App: React.FC = () => {
   const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem('agentic-chat-persona') as Persona) || Persona.Default);
   const [swarmMode, setSwarmMode] = useState<SwarmMode>(getInitialSwarmMode);
-  const [activeRoster, setActiveRoster] = useState<TaskType[]>(Object.values(TaskType));
+  const [activeRoster, setActiveRoster] = useState<TaskType[]>(getInitialActiveRoster);
   
   const pyodideRef = useRef<any>(null);
   const [isPyodideReady, setIsPyodideReady] = useState(false);
@@ -42,6 +58,7 @@ const App: React.FC = () => {
   useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, isLoading]);
   useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
   useEffect(() => localStorage.setItem('agentic-swarm-mode', swarmMode), [swarmMode]);
+  useEffect(() => localStorage.setItem('agentic-active-roster', JSON.stringify(activeRoster)), [activeRoster]);
 
   useEffect(() => {
     const lastTaskWithMessage = [...messages]
@@ -83,17 +100,21 @@ const App: React.FC = () => {
                 'canvas_assets/guide/04_RAG_and_Self_Augmentation.md',
                 'canvas_assets/guide/05_Reasoning_Patterns.md'
             ];
-
-            for (const path of guideFiles) {
+            
+            setEmbeddingStatus({ title: 'Ingesting Agentic Guide', progress: 0, total: guideFiles.length });
+            for (const [index, path] of guideFiles.entries()) {
+                setEmbeddingStatus({ title: `Ingesting: ${path.split('/').pop()}`, progress: index, total: guideFiles.length });
                 const response = await fetch(path);
                 if (!response.ok) throw new Error(`Failed to fetch ${path}`);
                 const text = await response.text();
                 await processAndEmbedDocument(path, text);
             }
             localStorage.setItem('agentic_guide_ingested_v2', 'true');
-            console.log("Agentic Guide ingestion complete.");
+            setEmbeddingStatus({ title: 'Guide Ingestion Complete!', progress: guideFiles.length, total: guideFiles.length });
+            setTimeout(() => setEmbeddingStatus(null), 1500);
         } catch (e) {
             console.error("Failed to ingest agentic guide:", e);
+            setEmbeddingStatus(null);
         }
     };
     ingestGuide();
@@ -159,15 +180,12 @@ const App: React.FC = () => {
   };
 
   const handleEmbedFile = async (docName: string, text: string) => {
-    const chunks = text.split('\n\n').filter(t => t.trim().length > 20);
-    const total = chunks.length;
-    if (total === 0) return;
-
-    setEmbeddingStatus({ title: `Embedding ${docName}`, progress: 0, total });
+    setEmbeddingStatus({ title: `Embedding ${docName}`, progress: 0, total: 1 });
     try {
       await processAndEmbedDocument(docName, text, ({ current, total }) => {
         setEmbeddingStatus({ title: `Embedding ${docName}`, progress: current, total });
       });
+      setEmbeddingStatus({ title: `Embedded ${docName}`, progress: 1, total: 1 });
       setTimeout(() => setEmbeddingStatus(null), 1500);
     } catch (e) {
       console.error(e);
@@ -206,21 +224,34 @@ const App: React.FC = () => {
         }
 
         if (window.confirm(`Ingest ${filesToIngest.length} relevant files from ${repo}? This may take a moment.`)) {
-            setEmbeddingStatus({ title: `Ingesting ${filesToIngest.length} files from ${repo}`, progress: 0, total: filesToIngest.length });
-            for (let i = 0; i < filesToIngest.length; i++) {
-                const path = filesToIngest[i];
-                setEmbeddingStatus({ title: `Ingesting: ${path}`, progress: i, total: filesToIngest.length });
-                const fileUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`;
-                const fileContent = await (await fetch(fileUrl)).text();
-                await processAndEmbedDocument(path, fileContent);
+            setEmbeddingStatus({ title: `Fetching ${filesToIngest.length} files...`, progress: 0, total: filesToIngest.length });
+            
+            const filePromises = filesToIngest.map(path => 
+              fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`)
+                .then(res => res.ok ? res.text() : Promise.reject(new Error(`Failed to fetch ${path}`)))
+                .then(text => ({ path, text }))
+            );
+            
+            const results = await Promise.allSettled(filePromises);
+            const validFiles = results
+              .filter(r => r.status === 'fulfilled')
+              .map(r => (r as PromiseFulfilledResult<{path: string, text: string}>).value);
+
+            setEmbeddingStatus({ title: `Embedding ${validFiles.length} files...`, progress: 0, total: validFiles.length });
+            for (let i = 0; i < validFiles.length; i++) {
+                const { path, text } = validFiles[i];
+                setEmbeddingStatus({ title: `Embedding: ${path}`, progress: i + 1, total: validFiles.length });
+                await processAndEmbedDocument(path, text);
             }
-            setEmbeddingStatus({ title: 'Ingestion complete!', progress: filesToIngest.length, total: filesToIngest.length });
+
+            setEmbeddingStatus({ title: 'Ingestion complete!', progress: validFiles.length, total: validFiles.length });
             setTimeout(() => setEmbeddingStatus(null), 1500);
         } else {
             setEmbeddingStatus(null);
         }
-    } catch (e: any) {
-        alert(`Failed to fetch repository. Error: ${e.message}`);
+    } catch (e) {
+        const error = e as Error;
+        alert(`Failed to fetch repository. Error: ${error.message}`);
         setEmbeddingStatus(null);
     }
   };

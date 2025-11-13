@@ -2,7 +2,39 @@
 import React, { useMemo } from 'react';
 import { SwarmMode, TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
-import { BrainCircuitIcon } from '../../components/Icons'; // A generic icon
+import { 
+    PlanIcon,
+    SearchIcon,
+    CodeBracketIcon,
+    CritiqueIcon,
+    ChatBubbleLeftRightIcon,
+    BrainCircuitIcon,
+    ImageIcon,
+    SparklesIcon,
+    RetryIcon,
+    DocumentTextIcon,
+    OptimizeIcon,
+    ChartBarIcon,
+    WrenchScrewdriverIcon, // NEW
+} from '../../components/Icons';
+
+const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
+    [TaskType.Planner]: PlanIcon,
+    [TaskType.Research]: SearchIcon,
+    [TaskType.Code]: CodeBracketIcon,
+    [TaskType.Critique]: CritiqueIcon,
+    [TaskType.Chat]: ChatBubbleLeftRightIcon,
+    [TaskType.Complex]: BrainCircuitIcon,
+    [TaskType.Vision]: ImageIcon,
+    [TaskType.Creative]: SparklesIcon,
+    [TaskType.Retry]: RetryIcon,
+    [TaskType.ManualRAG]: DocumentTextIcon,
+    [TaskType.Meta]: OptimizeIcon,
+    [TaskType.DataAnalyst]: ChartBarIcon,
+    [TaskType.Maintenance]: WrenchScrewdriverIcon, // NEW
+    [TaskType.Embedder]: BrainCircuitIcon, // Should not be visible
+    [TaskType.Reranker]: BrainCircuitIcon, // Should not be visible
+};
 
 const SECURITY_SERVICE_ROSTER = [TaskType.Planner, TaskType.Research, TaskType.Code, TaskType.Critique];
 
@@ -10,7 +42,7 @@ interface AgentRosterProps {
     swarmMode: SwarmMode;
     activeRoster: TaskType[];
     onRosterChange: (roster: TaskType[]) => void;
-    onShowAgentDetails: (agent: any) => void; // NEW
+    onShowAgentDetails: (agent: any) => void;
 }
 
 export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoster, onRosterChange, onShowAgentDetails }) => {
@@ -37,15 +69,19 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
             </p>
             <ul className="space-y-3">
                 {Object.entries(AGENT_ROSTER).map(([taskType, agent]) => {
+                    // Hide internal "worker" agents from the UI
+                    if (taskType === TaskType.Reranker || taskType === TaskType.Embedder) return null;
+
                     const isEnabled = rosterToDisplay.includes(taskType as TaskType);
+                    const Icon = taskToIcon[taskType as TaskType] || BrainCircuitIcon;
+
                     return (
                         <li key={taskType} className="flex items-center justify-between p-1">
                             <div className="flex items-start gap-3 flex-1 overflow-hidden">
-                                <BrainCircuitIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEnabled ? 'text-accent' : 'text-foreground/40'}`} />
+                                <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEnabled ? 'text-accent' : 'text-foreground/40'}`} />
                                 <div className="flex-1 overflow-hidden">
                                     <p className={`font-mono text-sm font-bold ${isEnabled ? 'text-foreground' : 'text-foreground/60'}`}>
                                         {agent.title}
-                                        {/* --- NEW BUTTON --- */}
                                         <button 
                                             onClick={() => onShowAgentDetails(agent)} 
                                             className="ml-1.5 text-foreground/60 hover:text-white transition-colors"
@@ -53,9 +89,10 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
                                         >
                                             [?]
                                         </button>
-                                        {/* --- END NEW BUTTON --- */}
                                     </p>
-                                    <p className="text-xs text-foreground/60 leading-snug truncate" title={agent.description}>{agent.concise_description}</p>
+                                    <p className="text-xs text-foreground/60 leading-snug truncate" title={agent.description}>
+                                        {agent.concise_description}
+                                    </p>
                                 </div>
                             </div>
                             {isInformalMode && (

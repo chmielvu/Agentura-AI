@@ -14,7 +14,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             },
             complexity_score: {
                 type: Type.NUMBER,
-                description: 'A score from 1 (trivial) to 10 (extremely complex) indicating the query complexity.',
+                description: 'A score from 1 (trivial) to 10 (extremely complex) indicating the query complexity.'
             }
         },
         required: ['route', 'complexity_score'],
@@ -38,25 +38,13 @@ export const SOURCE_EVALUATOR_TOOL: FunctionDeclaration = {
                     properties: {
                         url: { type: Type.STRING },
                         snippet: { type: Type.STRING },
-                        sourceTitle: { type: Type.STRING },
+                        sourceTitle: { type: Type.STRING }
                     }
                 }
             }
         },
         required: ['query', 'domain', 'sourcing_policy', 'sources'],
     },
-    response: {
-        type: Type.OBJECT,
-        properties: {
-            is_sufficient: { type: Type.BOOLEAN, description: 'True if sources are high-quality and sufficient to answer the query.' },
-            critique: { type: Type.STRING, description: 'A brief critique of the sources, noting gaps or low-quality results.' },
-            refined_queries: {
-                type: Type.ARRAY,
-                description: 'A list of new, refined search queries to use if is_sufficient is false.',
-                items: { type: Type.STRING }
-            }
-        }
-    }
 };
 
 export const APO_REFINE_TOOL: FunctionDeclaration = {
@@ -67,7 +55,7 @@ export const APO_REFINE_TOOL: FunctionDeclaration = {
         properties: {
             original_prompt: { type: Type.STRING, description: 'The user query or goal that led to the failed attempt.' },
             failed_output: { type: Type.STRING, description: 'The text of the failed v1 output, or the description of the failed plan step.' },
-            critique: { type: Type.STRING, description: 'The critique or error message of the failed output.' },
+            critique: { type: Type.STRING, description: 'The critique or error message of the failed output.' }
         },
         required: ['original_prompt', 'failed_output', 'critique'],
     },
@@ -79,7 +67,7 @@ export const CODE_INTERPRETER_TOOL: FunctionDeclaration = {
     parameters: {
         type: Type.OBJECT,
         properties: {
-            code: { type: Type.STRING, description: 'The Python code to execute.' },
+            code: { type: Type.STRING, description: 'The Python code to execute.' }
         },
         required: ['code'],
     },
@@ -91,7 +79,7 @@ export const VEO_TOOL: FunctionDeclaration = {
     parameters: {
         type: Type.OBJECT,
         properties: {
-            prompt: { type: Type.STRING, description: 'A highly descriptive, cinematic prompt including camera motion, lens, lighting, and audio.' },
+            prompt: { type: Type.STRING, description: 'A highly descriptive, cinematic prompt including camera motion, lens, lighting, and audio.' }
         },
         required: ['prompt'],
     },
@@ -105,12 +93,13 @@ export const MUSICFX_TOOL: FunctionDeclaration = {
         properties: {
             prompt: { type: Type.STRING, description: 'A prompt describing the vibe of the music.' },
             tags: {
-                type: Type.OBJECT, properties: {
+                type: Type.OBJECT,
+                properties: {
                     genre: { type: Type.ARRAY, items: { type: Type.STRING } },
                     instruments: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    tempo: { type: Type.STRING },
+                    tempo: { type: Type.STRING }
                 }
-            },
+            }
         },
         required: ['prompt'],
     },
@@ -123,7 +112,7 @@ export const CREATE_SOTA_METAPROMPT_TOOL: FunctionDeclaration = {
         type: Type.OBJECT,
         properties: {
             agent_role: { type: Type.STRING, description: 'The simple role for the new agent (e.g., "a travel agent").' },
-            agent_goal: { type: Type.STRING, description: 'The high-level goal for the new agent (e.g., "find the best flights").' },
+            agent_goal: { type: Type.STRING, description: 'The high-level goal for the new agent (e.g., "find the best flights").' }
         },
         required: ['agent_role', 'agent_goal'],
     },

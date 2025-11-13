@@ -6,6 +6,20 @@ import { SendIcon, PaperclipIcon, XCircleIcon, GitHubIcon } from '../../componen
 
 const gitHubRepoRegex = /https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/;
 
+// Allowed text MIME types for embedding
+const ALLOWED_TEXT_MIME_TYPES = [
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+  'application/javascript',
+  'text/x-python',
+  'text/html',
+  'application/x-javascript',
+  'text/javascript',
+];
+
+
 export const ChatInput: React.FC<{
   onSendMessage: (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => void;
   isLoading: boolean;
@@ -64,16 +78,25 @@ export const ChatInput: React.FC<{
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
         const selectedFile = e.target.files[0];
-        if (selectedFile.type.startsWith('image/')) {
+
+        const isImage = selectedFile.type.startsWith('image/');
+        const isTextForEmbedding = ALLOWED_TEXT_MIME_TYPES.includes(selectedFile.type);
+
+        if (isImage) {
             setFile(selectedFile);
-        } else {
+        } else if (isTextForEmbedding) {
             try {
                 const text = await selectedFile.text();
                 await onEmbedFile(selectedFile.name, text);
-            } catch (err: any) {
-                alert(`Failed to process ${selectedFile.name}. Error: ${err.message}`);
+            } catch (err) {
+                const error = err as Error;
+                alert(`Failed to process ${selectedFile.name}. Error: ${error.message}`);
             }
+        } else {
+            alert(`Unsupported file type: "${selectedFile.type}". Please select an image or a valid text file (.txt, .md, .csv, .json, .js, .py).`);
         }
+
+        // Clear the file input so the same file can be selected again
         if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };

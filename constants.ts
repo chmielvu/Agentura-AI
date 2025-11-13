@@ -9,18 +9,19 @@ import {
     MUSICFX_TOOL,
     CREATE_SOTA_METAPROMPT_TOOL
 } from './ui/hooks/toolDefinitions';
+import { Type } from '@google/genai';
 
 // Fix: Re-export ROUTER_TOOL so it can be imported from this module.
 export { ROUTER_TOOL };
 
 export const APP_TITLE = "Agentura AI";
-export const APP_VERSION = "3.1.0"; // ENHANCED: Supervisor Update
+export const APP_VERSION = "3.2.0"; // SOTA Metacognition Update
 
 export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v3.1).
 OBJECTIVE: Analyze the user's query in the context of the recent chat history. You must assess its complexity and select the single best downstream specialist agent to handle it.
 CONSTRAINTS:
 - You MUST choose from the available routes, which are the titles of the agents in the AGENT_ROSTER.
-- You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
+- You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex). This is a mandatory field.
 - Simple follow-ups (e.g., "why?") about a complex topic MUST be routed to the previous specialist agent (e.g., 'Research', 'Code'), NOT 'Chat'.
 - If a query is unclear, you MUST route to 'Chat' and ask for HITL clarification.
 
@@ -33,15 +34,17 @@ Available Routes:
 - 'Code': For mathematical/logical computation, PoT, or pure code generation.
 - 'Creative': For generating stories, media prompts, or creative writing.
 - 'Retry': For requests to retry a failed task, often following a critique.
-- 'ManualRAG': For answering questions using the local RAG archive.
+- 'ManualRAG': For answering questions using the local RAG archive. This will trigger a Retrieve-Rerank-Synthesize flow.
 - 'Meta': For requests to create a new agent.
 - 'DataAnalyst': For requests to analyze, plot, or visualize data.
+- 'Maintenance': For requests to debug the app, find errors, or suggest code improvements.
+- 'Reranker': (Internal Tool) This agent scores and reranks retrieved documents. Do not route directly to this.
 
-Based on the user's query and history, choose the most appropriate route and score its complexity.
+Based on the user's query and history, choose the most appropriate route and provide a mandatory complexity score.
 `;
 
 // Defines all available specialist agents in the system
-export const AGENT_ROSTER: Record<TaskType, any> = {
+export const AGENT_ROSTER = {
   [TaskType.Planner]: {
     model: 'gemini-2.5-pro',
     title: 'Planner Agent',
@@ -54,20 +57,20 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: "OBJECT",
+        type: Type.OBJECT,
         properties: {
           plan: {
-            type: "ARRAY",
+            type: Type.ARRAY,
             description: "The detailed, step-by-step plan.",
             items: {
-              type: "OBJECT",
+              type: Type.OBJECT,
               properties: {
-                step_id: { type: "NUMBER" },
-                description: { type: "STRING" },
-                tool_to_use: { type: "STRING", enum: Object.values(TaskType) },
-                acceptance_criteria: { type: "STRING" },
-                inputs: { type: "ARRAY", items: { type: "STRING" } },
-                output_key: { type: "STRING" },
+                step_id: { type: Type.NUMBER },
+                description: { type: Type.STRING },
+                tool_to_use: { type: Type.STRING, enum: Object.values(TaskType) },
+                acceptance_criteria: { type: Type.STRING },
+                inputs: { type: Type.ARRAY, items: { type: Type.STRING } },
+                output_key: { type: Type.STRING },
               },
               required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
             },
@@ -76,9 +79,16 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
         required: ['plan'],
       },
     },
-    systemInstruction: `IDENTITY: You are a 'Planner' agent.
-    OBJECTIVE: Decompose the user's goal into a JSON plan. You have access to a roster of specialist agents.
-    PROCEDURE: You must analyze the user's goal and the list of available agents, then output a step-by-step plan. Your plan steps can pass data. If a step's description needs data from a previous step, use curly braces (e.g., {myResult}). Then, list the keys in the 'inputs' array (e.g., ['myResult']). If a step produces data, give it a unique 'output_key'. If the user's goal is to fix a failed plan, analyze the [Failed Step] and [Error Message] and generate a new, complete plan that either fixes the step or provides an alternative path.`
+    systemInstruction: `IDENTITY: You are a 'Tree-of-Thoughts (ToT) Planner' agent.
+    OBJECTIVE: Decompose the user's goal into the single best JSON plan. You must use a ToT reasoning pattern.
+    PROCEDURE:
+    1.  **Analyze Goal:** User goal is: {goal}. Available agents are: {agents}.
+    2.  **Generate Thoughts (Plans):** Internally generate 2-3 distinct, high-level candidate plans (chains-of-thought) to achieve the goal.
+    3.  **Evaluate Thoughts:** For each candidate plan, internally critique it. Score it on 'feasibility' (0.0-1.0) and 'efficiency' (0.0-1.0). Consider if agents are used correctly.
+    4.  **Select Best:** Choose the single plan with the highest combined score.
+    5.  **Finalize Plan:** Decompose the *selected* plan into detailed, step-by-step JSON.
+    6.  **RAG Workflow:** If the user's goal is to query the archive (e.g., '/manualrag'), your plan *must* be a 3-step process: 1. \`TaskType.ManualRAG\` (to retrieve), 2. \`TaskType.Reranker\` (to score and filter), 3. \`TaskType.Chat\` (to synthesize the answer from the reranked context).
+    7.  **Output:** Output *only* the final, best JSON plan object.`
   },
   [TaskType.Research]: {
     model: 'gemini-2.5-pro',
@@ -102,16 +112,27 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
   },
   [TaskType.Code]: {
     model: 'gemini-2.5-pro',
-    title: 'Code Agent (PoT)',
+    title: 'Code Agent (PoT + Reflexion)',
     description: 'Generates and autonomously debugs Python code.',
     concise_description: 'Generates & debugs Python code.',
-    strengths: 'Primary tool for math, logic, and data analysis. Can execute Python code in a sandbox.',
+    strengths: 'Primary tool for math, logic, and data analysis. Uses a Reflexion loop to self-debug.',
     weaknesses: 'Only runs Python. Cannot install new libraries.',
     example_prompt: '`/code` calculate the fibonacci sequence up to 20 and print it.',
     tools: [{ functionDeclarations: [CODE_INTERPRETER_TOOL] }],
     config: {},
-    systemInstruction: `You are a 'Code Agent'...
-    - If you receive a [Failed Code] and [Error Message], your only job is to debug the code and call code_interpreter with the corrected version.`
+    systemInstruction: `IDENTITY: You are a 'Code Agent' with a 'Reflexion' loop.
+    OBJECTIVE: To write and execute correct Python code to solve the user's request.
+    
+    PROCEDURE (Program-of-Thought):
+    1.  **Thought:** Analyze the user's request: {prompt}.
+    2.  **Act:** Call the \`code_interpreter\` tool with the Python code to solve the request.
+    
+    PROCEDURE (Reflexion Loop - If you receive failed code):
+    1.  **Analyze Failure:** You will be given [Failed Code] and [Error Message].
+    2.  **Thought:** Analyze the error. What was the root cause? (e.g., "TypeError," "NameError," "Logic Error").
+    3.  **Critique:** Write an internal critique of the failed code.
+    4.  **Refine:** Write the corrected, debugged Python code.
+    5.  **Act (Retry):** Call the \`code_interpreter\` tool with the new, corrected code.`
   },
    [TaskType.Critique]: {
     model: 'gemini-2.5-flash',
@@ -125,18 +146,18 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-            type: "OBJECT",
+            type: Type.OBJECT,
             properties: {
                 scores: { 
-                    type: "OBJECT",
+                    type: Type.OBJECT,
                     properties: { 
-                        faithfulness: { type: "NUMBER" }, 
-                        coherence: { type: "NUMBER" }, 
-                        coverage: { type: "NUMBER" }
+                        faithfulness: { type: Type.NUMBER }, 
+                        coherence: { type: Type.NUMBER }, 
+                        coverage: { type: Type.NUMBER }
                     },
                     required: ['faithfulness', 'coherence', 'coverage']
                 },
-                critique: { type: "STRING" },
+                critique: { type: Type.STRING },
             },
             required: ['scores', 'critique'],
         },
@@ -158,7 +179,7 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     example_prompt: 'Hello, how are you?',
     tools: [],
     config: {},
-    systemInstruction: `You are a helpful and concise synthesizer agent. Your job is to take the [CONTEXT] from other agents and formulate a final, clean answer for the user.`
+    systemInstruction: `You are a helpful and concise synthesizer agent. Your job is to take the [CONTEXT] from other agents (like RAG results) and formulate a final, clean answer for the user.`
   },
    [TaskType.Complex]: {
     model: 'gemini-2.5-pro',
@@ -173,7 +194,7 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
       thinkingConfig: { thinkingBudget: 32768 },
     },
     systemInstruction: `IDENTITY: You are a 'Complex' reasoning agent.
-          OBJECTIVE: To provide a comprehensive, deeply reasoned answer.
+          OBJECTIVE: To provide a comprehensive, deeply reasoned answer using a Reflexion loop.
           PROCEDURE:
           1. Your first output will be a 'v1' draft.
           2. This draft will be *autonomously critiqued* by another agent.
@@ -226,33 +247,36 @@ PROCEDURE:
       model: 'gemini-2.5-flash',
       title: 'Local RAG Agent',
       description: 'Answers questions using the local document archive.',
-      concise_description: 'Answers questions using local docs.',
+      concise_description: 'Retrieves docs from local archive.',
       strengths: 'Answers are "grounded" *only* in the documents you provide via the Archive.',
-      weaknesses: 'Cannot answer any questions about topics not in your Archive. Does not use general knowledge.',
+      weaknesses: 'This agent only *retrieves*. It does not synthesize. It is the first step in a RAG-Rerank-Synthesize pipeline.',
       example_prompt: '`/manualrag` Summarize the "doc1_rag_sample.md" file from my archive.',
       tools: [],
       config: {},
-      systemInstruction: `IDENTITY: You are a RAG agent.
-    OBJECTIVE: To answer the user's query.
+      systemInstruction: `IDENTITY: You are a RAG retrieval agent.
+    OBJECTIVE: To answer the user's query *only* using the provided context.
     PROCEDURE:
-    1. The user's prompt will contain a "User Query" at the end.
-    2. The prompt MAY also contain "--- RELEVANT CONTEXT FROM YOUR ARCHIVE ---".
-    3. You MUST answer the query using *only* this provided context.
-    4. You MUST cite your sources using the [Source: ...] tag provided in the context for each piece of information.
-    5. If the provided context is insufficient to answer the query, you MUST state that you cannot answer the question based on the provided documents. Do not use your general knowledge.`
+    1. The user's prompt will contain a "User Query" at the end and "--- RELEVANT CONTEXT ---" at the start.
+    2. You MUST answer the query using *only* this provided context.
+    3. You MUST cite your sources using the [Source: ...] tag provided in the context for each piece of information.
+    4. If the provided context is insufficient, you MUST state that you cannot answer the question based on the provided documents.`
   },
   [TaskType.Meta]: {
     model: 'gemini-2.5-pro',
-    title: 'Meta-Agent',
+    title: 'Meta-Agent (APO)',
     description: 'Optimizes and creates new agent instructions.',
-    concise_description: 'Creates new agent system instructions.',
-    strengths: 'Can write new, SOTA-compliant system instructions for new agents, augmenting the swarm.',
+    concise_description: 'Creates & refines new agent prompts.',
+    strengths: 'Uses Automatic Prompt Optimization (APO) patterns to write SOTA-compliant system instructions.',
     weaknesses: 'This is a high-level agent; its outputs are new instructions, not final answers.',
     example_prompt: '`/add_agent` Create a new agent that acts as a Socratic tutor.',
     tools: [{ functionDeclarations: [CREATE_SOTA_METAPROMPT_TOOL] }],
     config: {},
-    systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in agentic design and metaprompt engineering.
-    OBJECTIVE: To create new, SOTA-compliant system instructions for specialist agents based on a user's simple request.`
+    systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in Automatic Prompt Optimization (APO) and agentic design.
+    OBJECTIVE: To create or refine SOTA-compliant system instructions for specialist agents.
+    PROCEDURE:
+    1.  **Analyze Request:** The user will either ask to 'create' a new agent (e.g., "/add_agent a travel agent") or 'refine' an existing one.
+    2.  **Create:** If creating, use your knowledge of SOTA patterns (PWC, ReAct, Reflexion, ToT) to write a new, robust system instruction.
+    3.  **Refine (Textual Gradients):** If refining, you will be given an [Original Prompt] and a [Critique]. Your job is to generate a 'Textual Gradient' (an explanation of the failure) and a {New_Prompt} that fixes the flaw.`
   },
   [TaskType.DataAnalyst]: {
     model: 'gemini-2.5-pro',
@@ -266,15 +290,15 @@ PROCEDURE:
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: "OBJECT",
+        type: Type.OBJECT,
         properties: {
-          type: { type: "STRING", enum: ["bar", "line", "pie"] },
+          type: { type: Type.STRING, enum: ["bar", "line", "pie"] },
           data: { 
-            type: "ARRAY",
-            items: { type: "OBJECT" }
+            type: Type.ARRAY,
+            items: { type: Type.OBJECT }
           },
-          dataKey: { type: "STRING" },
-          categoryKey: { type: "STRING" },
+          dataKey: { type: Type.STRING },
+          categoryKey: { type: Type.STRING },
         },
         required: ['type', 'data', 'dataKey', 'categoryKey'],
       },
@@ -299,6 +323,73 @@ PROCEDURE:
     tools: [],
     config: {},
     systemInstruction: `IDENTITY: You are an embedder agent. You are not user-facing. Your job is to create vector embeddings.`
+  },
+  // --- NEW SOTA RERANKER AGENT ---
+  [TaskType.Reranker]: {
+    model: 'gemini-2.5-flash', // Fast and cheap, perfect for scoring
+    title: 'Reranker Agent',
+    description: 'A "worker" agent that reranks retrieved documents for relevance.',
+    concise_description: '(Internal) Reranks RAG results.',
+    strengths: 'Emulates a fine-tuned BERT reranker to score retrieved chunks, significantly improving RAG quality.',
+    weaknesses: 'Not user-facing. Only scores, does not synthesize.',
+    example_prompt: 'This agent is not user-facing.',
+    tools: [],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          reranked_chunks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                documentName: { type: Type.STRING },
+                chunkContent: { type: Type.STRING },
+                rerankScore: { type: Type.NUMBER },
+              },
+              required: ['documentName', 'chunkContent', 'rerankScore'],
+            },
+          },
+        },
+        required: ['reranked_chunks'],
+      },
+    },
+    systemInstruction: `IDENTITY: You are a 'Reranker' agent, emulating a BERT Cross-Encoder.
+    OBJECTIVE: You will be given a [User Query] and a list of [Retrieved Chunks]. Your *only* job is to score each chunk for its relevance to the query and return a JSON object.
+    PROCEDURE:
+    1.  Analyze the [User Query].
+    2.  For each [Retrieved Chunk], assign a 'rerankScore' from 0.0 (not relevant) to 1.0 (perfectly relevant).
+    3.  A score of 1.0 means the chunk *directly* answers the query.
+    4.  A score of 0.5 means the chunk mentions *keywords* but does not answer the query.
+    5.  A score of 0.0 means the chunk is irrelevant.
+    6.  Return *only* the JSON object with the reranked_chunks. Do not add any conversational text.
+    
+    [User Query]: {query}
+    [Retrieved Chunks]: {chunks_json}`
+  },
+  // --- NEW MAINTENANCE AGENT ---
+  [TaskType.Maintenance]: {
+    model: 'gemini-2.5-pro',
+    title: 'Maintenance Agent',
+    description: 'Performs app-wide debugging, finds syntax errors, and cleans up unused files.',
+    concise_description: 'Debugs the app and finds errors.',
+    strengths: 'Good for high-level code analysis and maintaining application health.',
+    weaknesses: 'Does not execute code or perform file operations directly. It only analyzes and reports.',
+    example_prompt: '`/maintenance` Run a full diagnostic on the application code.',
+    tools: [],
+    config: {},
+    systemInstruction: `IDENTITY: You are a 'Maintenance Agent'.
+    OBJECTIVE: To analyze the application codebase for syntax errors, unused files, and potential bugs.
+    PROCEDURE:
+    1.  You will be asked to perform a diagnostic run.
+    2.  Analyze the provided file structure and code snippets.
+    3.  Identify potential issues such as:
+        - Syntax errors or typos in code.
+        - Unused components or functions.
+        - Obvious logical errors.
+    4.  Provide a clear, concise report of your findings in markdown format.
+    5.  If you find no issues, state that the "System is nominal."`
   }
 };
 
@@ -327,7 +418,7 @@ export const SOTA_SECURITY_PIPELINE = {
   ]
 };
 
-export const PERSONA_CONFIGS: Record<Persona, { instruction: string }> = {
+export const PERSONA_CONFIGS = {
   [Persona.Default]: {
     instruction: '',
   },

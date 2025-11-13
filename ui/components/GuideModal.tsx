@@ -8,31 +8,64 @@ interface GuideDoc {
     content: string;
 }
 
-// Simple renderer to handle paragraphs, bolding, and code blocks
+// Helper for inline styles like bold and code
+const renderInlineMarkdown = (text: string) => {
+    return text.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={i}>{part.substring(2, part.length - 2)}</strong>;
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+            return <code key={i} className="text-xs font-mono bg-background p-0.5 rounded-sm">{part.substring(1, part.length - 1)}</code>;
+        }
+        return part;
+    });
+};
+
+// Main renderer for block-level elements
 const renderMarkdown = (text: string) => {
     return text.split('\n\n').map((paragraph, pIndex) => {
+        // Handle code blocks
         if (paragraph.startsWith('```')) {
             return (
                 <pre key={pIndex} className="text-xs bg-background p-2 rounded-sm border border-border/50 text-foreground/70 font-mono my-4">
-                    <code>{paragraph.replace(/```/g, '')}</code>
+                    <code>{paragraph.replace(/```/g, '').trim()}</code>
                 </pre>
             );
         }
         
+        // Handle headers
+        if (paragraph.startsWith('#')) {
+            return (
+                <h3 key={pIndex} className="text-2xl font-bold mt-6 mb-2 text-accent">
+                    {paragraph.replace(/#/g, '').trim()}
+                </h3>
+            );
+        }
+
+        // Handle lists
+        const isUnordered = paragraph.trim().startsWith('* ');
+        const isOrdered = paragraph.trim().match(/^\d+\.\s/);
+        
+        if (isUnordered || isOrdered) {
+            const items = paragraph.split('\n').map(item => 
+                isUnordered 
+                ? item.trim().substring(2)
+                : item.trim().replace(/^\d+\.\s/, '')
+            );
+            const ListTag = isUnordered ? 'ul' : 'ol';
+            const listClass = isUnordered ? 'list-disc' : 'list-decimal';
+
+            return (
+                <ListTag key={pIndex} className={`${listClass} list-inside mb-4 space-y-1`}>
+                    {items.map((li, liIndex) => <li key={liIndex}>{renderInlineMarkdown(li)}</li>)}
+                </ListTag>
+            );
+        }
+        
+        // Handle regular paragraphs
         return (
             <p key={pIndex} className="mb-4">
-                {paragraph.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, i) => {
-                    if (part.startsWith('**') && part.endsWith('**')) {
-                        return <strong key={i}>{part.substring(2, part.length - 2)}</strong>;
-                    }
-                    if (part.startsWith('`') && part.endsWith('`')) {
-                        return <code key={i} className="text-xs font-mono bg-background p-0.5 rounded-sm">{part.substring(1, part.length - 1)}</code>;
-                    }
-                    if (part.startsWith('#')) {
-                         return <h3 key={i} className="text-2xl font-bold mt-6 mb-2 text-accent">{part.replace(/#/g, '')}</h3>
-                    }
-                    return <React.Fragment key={i}>{part.replace(/\n/g, '<br/>')}</React.Fragment>;
-                })}
+                {renderInlineMarkdown(paragraph)}
             </p>
         );
     });

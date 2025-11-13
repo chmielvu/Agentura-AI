@@ -14,7 +14,7 @@ interface ContextPanelProps {
         taskType: TaskType;
         workflowState: WorkflowState;
     } | null;
-    onShowAgentDetails: (agent: any) => void; // NEW
+    onShowAgentDetails: (agent: any) => void;
 }
 
 type View = 'commands' | 'graph' | 'roster' | 'archive';
@@ -39,7 +39,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
                             swarmMode={props.swarmMode} 
                             activeRoster={props.activeRoster} 
                             onRosterChange={props.onRosterChange}
-                            onShowAgentDetails={props.onShowAgentDetails} // Pass prop
+                            onShowAgentDetails={props.onShowAgentDetails}
                        />;
             case 'archive': 
                 return <ArchiveManager />;
@@ -50,11 +50,13 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
 
     return (
         <div className="h-full flex flex-col bg-card/50">
-            <div className="flex-shrink-0 flex items-center border-b border-border">
-                <TabButton name="Agent Roster" view="roster" activeTab={activeTab} setActiveTab={setActiveTab} />
-                <TabButton name="Archive" view="archive" activeTab={activeTab} setActiveTab={setActiveTab} />
-                <TabButton name="Commands" view="commands" activeTab={activeTab} setActiveTab={setActiveTab} />
-                <TabButton name="Graph" view="graph" activeTab={activeTab} setActiveTab={setActiveTab} />
+            <div className="flex-shrink-0 flex items-stretch border-b border-border">
+                <div className="flex items-center">
+                    <TabButton name="Agent Roster" view="roster" activeTab={activeTab} setActiveTab={setActiveTab} />
+                    <TabButton name="Archive" view="archive" activeTab={activeTab} setActiveTab={setActiveTab} />
+                    <TabButton name="Commands" view="commands" activeTab={activeTab} setActiveTab={setActiveTab} />
+                    <TabButton name="Graph" view="graph" activeTab={activeTab} setActiveTab={setActiveTab} />
+                </div>
             </div>
             <div className="flex-1 overflow-y-auto">
                 {renderView()}
@@ -67,7 +69,7 @@ const TabButton: React.FC<{ name: string, view: View, activeTab: View, setActive
 ({ name, view, activeTab, setActiveTab }) => (
     <button 
         onClick={() => setActiveTab(view)}
-        className={`px-3 py-2 text-xs font-sans font-semibold uppercase tracking-wider transition-colors ${
+        className={`px-3 py-2 text-xs font-sans font-semibold uppercase tracking-wider transition-colors h-full ${
             activeTab === view ? 'text-foreground border-b-2 border-accent' : 'text-foreground/60 hover:text-foreground'
         }`}
     >

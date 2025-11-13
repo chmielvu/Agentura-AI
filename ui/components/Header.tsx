@@ -7,7 +7,6 @@ import { PolishEagleIcon } from '../../components/PolishEagleIcon';
 export const Header: React.FC<{
   persona: Persona;
   onPersonaChange: (persona: Persona) => void;
-  // Corrected typo from Swarmode to SwarmMode
   swarmMode: SwarmMode;
   onSwarmModeChange: (mode: SwarmMode) => void;
   isLoading: boolean;
@@ -44,15 +43,17 @@ export const Header: React.FC<{
   return (
     <header className="bg-card p-4 border-b border-border z-20">
         <div className="flex justify-between items-center">
-            <div className="w-10 h-10 flex items-center justify-center bg-accent rounded-sm" title="Agentura">
+            <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-accent rounded-sm" title="Agentura">
                 <PolishEagleIcon className="w-8 h-8 text-background" />
             </div>
-            <div className="flex items-center space-x-3">
+            
+            <div className="flex items-center space-x-4">
                 <span className="text-2xl text-accent font-bold">★</span>
                 <h1 className="text-2xl font-bold text-foreground font-sans tracking-wider">{APP_TITLE}</h1>
                 <span className="text-2xl text-accent font-bold">★</span>
             </div>
-            <div className="w-10 h-10" /> {/* Spacer div for centering */}
+
+            <div className="w-10 h-10 flex-shrink-0"></div>
         </div>
 
         <div className="mt-4 pt-3 flex justify-center items-center text-xs font-mono border-t border-border/50 gap-4">

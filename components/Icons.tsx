@@ -168,3 +168,99 @@ export const WrenchScrewdriverIcon: React.FC<{ className?: string }> = ({ classN
         <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.87-5.87m0 0L11.42 15.17m5.87-5.87L15.17 11.42m5.87-5.87L17.25 3l-5.87 5.87m0 0L3 17.25A2.652 2.652 0 0 0 6.75 21l8.42-8.42m0 0L3 6.75a2.652 2.652 0 0 1 0-3.749m10.668 10.668 3.75-3.75m-3.75 3.75a2.652 2.652 0 0 1-3.749 0m3.749 0 3.75 3.75m-3.75-3.75L9.375 9.375" />
     </svg>
 );
+
+// --- AGENT SPRITE ICONS (v2 - Thematic Human Figures) ---
+const AgentSpriteBase: React.FC<{ children?: React.ReactNode, className?: string }> = ({ children, className }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="6" r="3"/>
+    <path d="M2 13.5a10 10 0 0 1 20 0v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5z"/>
+    {children}
+  </svg>
+);
+
+export const PlannerSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M12 12v6"/>
+    <path d="M9 15h6"/>
+  </AgentSpriteBase>
+);
+
+export const ResearchSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <circle cx="11" cy="14" r="2.5"/>
+    <line x1="12.75" y1="15.75" x2="15" y2="18"/>
+  </AgentSpriteBase>
+);
+
+export const CodeSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <polyline points="10 13 8 15.5 10 18"/>
+    <polyline points="14 13 16 15.5 14 18"/>
+  </AgentSpriteBase>
+);
+
+export const CritiqueSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="m10 15 2 2 4-4"/>
+  </AgentSpriteBase>
+);
+
+export const SynthesizerSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M8 14c.5.667 1.5 1 3 1s2.5-.333 3-1"/>
+    <path d="M8 17c.5.667 1.5 1 3 1s2.5-.333 3-1"/>
+  </AgentSpriteBase>
+);
+
+export const ComplexSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M12 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0"/>
+    <path d="M12 16a2 2 0 1 0-4 0 2 2 0 0 0 4 0"/>
+    <path d="M14 14h-2a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2h2"/>
+    <path d="M10 14h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2"/>
+  </AgentSpriteBase>
+);
+
+export const VisionSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M8 15.5a4 4 0 0 0 8 0 4 4 0 0 0-8 0z"/>
+    <circle cx="12" cy="15.5" r="1"/>
+  </AgentSpriteBase>
+);
+
+export const CreativeSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M12 11l.95 2.05L15 14l-2.05.95L12 17l-.95-2.05L9 14l2.05-.95z"/>
+    <path d="M16 11.5l.475 1.025L17.5 13l-1.025.475L16 14.5l-.475-1.025L14.5 13l1.025-.475z"/>
+    <path d="M8 16.5l.475 1.025L9.5 18l-1.025.475L8 19.5l-.475-1.025L6.5 18l1.025-.475z"/>
+  </AgentSpriteBase>
+);
+
+export const RagSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M9 12h6v6H9z"/>
+    <path d="m9 12 2-2h4"/>
+  </AgentSpriteBase>
+);
+
+export const MetaSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <circle cx="12" cy="14" r="1"/>
+    <path d="M10.5 15.5a1.5 1.5 0 0 1 3 0v1.5h-3v-1.5z"/>
+  </AgentSpriteBase>
+);
+
+export const DataAnalystSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M9 18v-4"/>
+    <path d="M12 18v-7"/>
+    <path d="M15 18v-2"/>
+  </AgentSpriteBase>
+);
+
+export const MaintenanceSprite: React.FC<{ className?: string }> = ({ className }) => (
+  <AgentSpriteBase className={className}>
+    <path d="M9.5 12a2.5 2.5 0 0 1 5 0v0a2.5 2.5 0 0 1-2.5 2.5h-1a2 2 0 0 0-2 2v1"/>
+    <path d="m14 16-2-2 4-4 2 2-4 4z"/>
+  </AgentSpriteBase>
+);

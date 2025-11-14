@@ -3,34 +3,35 @@ import React, { useMemo } from 'react';
 import { SwarmMode, TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
 import { 
-    PlanIcon,
-    SearchIcon,
-    CodeBracketIcon,
-    CritiqueIcon,
-    ChatBubbleLeftRightIcon,
     BrainCircuitIcon,
-    ImageIcon,
-    SparklesIcon,
-    DocumentTextIcon,
-    OptimizeIcon,
-    ChartBarIcon,
-    WrenchScrewdriverIcon,
+    PlannerSprite,
+    ResearchSprite,
+    CodeSprite,
+    CritiqueSprite,
+    SynthesizerSprite,
+    ComplexSprite,
+    VisionSprite,
+    CreativeSprite,
+    RagSprite,
+    MetaSprite,
+    DataAnalystSprite,
+    MaintenanceSprite,
 } from '../../components/Icons';
 
 export const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
-    [TaskType.Planner]: PlanIcon,
-    [TaskType.Research]: SearchIcon,
-    [TaskType.Code]: CodeBracketIcon,
-    [TaskType.Critique]: CritiqueIcon,
-    [TaskType.Chat]: ChatBubbleLeftRightIcon,
-    [TaskType.Complex]: BrainCircuitIcon,
-    [TaskType.Vision]: ImageIcon,
-    [TaskType.Creative]: SparklesIcon,
+    [TaskType.Planner]: PlannerSprite,
+    [TaskType.Research]: ResearchSprite,
+    [TaskType.Code]: CodeSprite,
+    [TaskType.Critique]: CritiqueSprite,
+    [TaskType.Chat]: SynthesizerSprite,
+    [TaskType.Complex]: ComplexSprite,
+    [TaskType.Vision]: VisionSprite,
+    [TaskType.Creative]: CreativeSprite,
     [TaskType.Retry]: BrainCircuitIcon, // Internal
-    [TaskType.ManualRAG]: DocumentTextIcon,
-    [TaskType.Meta]: OptimizeIcon,
-    [TaskType.DataAnalyst]: ChartBarIcon,
-    [TaskType.Maintenance]: WrenchScrewdriverIcon,
+    [TaskType.ManualRAG]: RagSprite,
+    [TaskType.Meta]: MetaSprite,
+    [TaskType.DataAnalyst]: DataAnalystSprite,
+    [TaskType.Maintenance]: MaintenanceSprite,
     [TaskType.Embedder]: BrainCircuitIcon, // Internal
     [TaskType.Reranker]: BrainCircuitIcon, // Internal
     [TaskType.Verifier]: BrainCircuitIcon, // Internal

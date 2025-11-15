@@ -9,11 +9,10 @@ import { taskToIcon } from './AgentRoster';
 export const Message: React.FC<{ 
     message: ChatMessage;
     onExecuteCode: (messageId: string, functionCallId: string) => void;
-    onDebugCode: (messageId: string, functionCallId: string) => void;
     onExecutePlan: (plan: Plan) => void;
     onRetryPlan: (plan: Plan) => void;
     onRequestFeedback: (messageId: string, taskType: TaskType) => void;
-}> = ({ message, onExecuteCode, onDebugCode, onExecutePlan, onRetryPlan, onRequestFeedback }) => {
+}> = ({ message, onExecuteCode, onExecutePlan, onRetryPlan, onRequestFeedback }) => {
   const isUser = message.role === 'user';
 
   const renderContent = (content: string) => (
@@ -165,7 +164,8 @@ export const Message: React.FC<{
                         {call.isAwaitingExecution && (
                             <div className="px-4 py-2 border-t flex items-center gap-2">
                                 <button onClick={() => onExecuteCode(message.id, call.id)} className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm">Execute</button>
-                                <button onClick={() => onDebugCode(message.id, call.id)} className="text-xs bg-card hover:bg-border px-3 py-1 rounded-sm border">Debug</button>
+                                {/* REFACTOR 1.2: Remove Debug button */}
+                                {/* <button onClick={() => onDebugCode(message.id, call.id)} className="text-xs bg-card hover:bg-border px-3 py-1 rounded-sm border">Debug</button> */}
                             </div>
                         )}
                     </div>

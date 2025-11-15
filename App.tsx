@@ -5,7 +5,7 @@ import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
 import { ChatInput } from './ui/components/ChatInput';
-import DebuggerModal from './components/Debugger';
+// import DebuggerModal from './components/Debugger'; // REFACTOR 1.2: Removed
 import { agentGraphConfigs } from './ui/components/graphConfigs';
 import { ContextPanel } from './ui/components/ContextPanel';
 import { AGENT_ROSTER } from './constants';
@@ -49,11 +49,12 @@ const App: React.FC = () => {
   const [swarmMode, setSwarmMode] = useState<SwarmMode>(getInitialSwarmMode);
   const [activeRoster, setActiveRoster] = useState<TaskType[]>(getInitialActiveRoster);
   
-  const pyodideRef = useRef<any>(null);
-  const [isPyodideReady, setIsPyodideReady] = useState(false);
-  const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
+  // REFACTOR 1.2: Remove all Pyodide state
+  // const pyodideRef = useRef<any>(null);
+  // const [isPyodideReady, setIsPyodideReady] = useState(false);
+  // const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
   
-  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback } = useModularOrchestrator(persona, swarmMode, activeRoster, pyodideRef);
+  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback } = useModularOrchestrator(persona, swarmMode, activeRoster); // REFACTOR 1.2: Removed pyodideRef
   const { messages, isLoading } = state;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -84,16 +85,17 @@ const App: React.FC = () => {
     }
   }, [messages]);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const pyodide = await (window as any).loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/' });
-        pyodideRef.current = pyodide;
-        setIsPyodideReady(true);
-      } catch (e) { console.error("Pyodide loading failed:", e); }
-    }
-    load();
-  }, []);
+  // REFACTOR 1.2: Remove Pyodide loading logic
+  // useEffect(() => {
+  //   async function load() {
+  //     try {
+  //       const pyodide = await (window as any).loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/' });
+  //       pyodideRef.current = pyodide;
+  //       setIsPyodideReady(true);
+  //     } catch (e) { console.error("Pyodide loading failed:", e); }
+  //   }
+  //   load();
+  // }, []);
   
   useEffect(() => {
     if (!isEmbedderReady) return;
@@ -144,19 +146,20 @@ const App: React.FC = () => {
     setPersona(newPersona);
   };
   
-  const handleDebugCode = (messageId: string, functionCallId: string) => {
-    const msg = messages.find(m => m.id === messageId);
-    const fc = msg?.functionCalls?.find(f => f.id === functionCallId);
-    if (!msg || !fc || !pyodideRef.current) return;
+  // REFACTOR 1.2: Remove Debug handler
+  // const handleDebugCode = (messageId: string, functionCallId: string) => {
+  //   const msg = messages.find(m => m.id === messageId);
+  //   const fc = msg?.functionCalls?.find(f => f.id === functionCallId);
+  //   if (!msg || !fc || !pyodideRef.current) return;
     
-    setDebugSession({
-      code: fc.args.code,
-      onComplete: (output: string) => {
-        handleExecuteCode(messageId, functionCallId, output);
-        setDebugSession(null);
-      },
-    });
-  };
+  //   setDebugSession({
+  //     code: fc.args.code,
+  //     onComplete: (output: string) => {
+  //       handleExecuteCode(messageId, functionCallId, output);
+  //       setDebugSession(null);
+  //     },
+  //   });
+  // };
   
   const handleExportSession = () => {
     const { messages } = state;
@@ -269,9 +272,10 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-row bg-background text-foreground font-mono">
-      {debugSession && (
+      {/* REFACTOR 1.2: Remove DebuggerModal */}
+      {/* {debugSession && (
         <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
-      )}
+      )} */}
       {feedbackModal && (
           <FeedbackModal
               taskType={feedbackModal.taskType}
@@ -313,7 +317,7 @@ const App: React.FC = () => {
           swarmMode={swarmMode}
           onSwarmModeChange={handleSwarmModeChange}
           isLoading={isLoading}
-          isPyodideReady={isPyodideReady}
+          isPyodideReady={true} // REFACTOR 1.2: Hardcode to true
           messages={messages}
           onShowGuide={() => setIsGuideOpen(true)}
           onExportSession={handleExportSession}
@@ -333,7 +337,6 @@ const App: React.FC = () => {
                             key={msg.id}
                             message={msg}
                             onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
-                            onDebugCode={handleDebugCode}
                             onExecutePlan={(plan) => handleExecutePlan(plan, [])}
                             onRetryPlan={(plan) => handleExecutePlan(plan, [])}
                             onRequestFeedback={(msgId, taskType) => setFeedbackModal({ msgId, taskType })}
@@ -348,7 +351,7 @@ const App: React.FC = () => {
                 <ChatInput 
                     onSendMessage={handleSendMessage} 
                     isLoading={isLoading} 
-                    isPyodideReady={isPyodideReady}
+                    isPyodideReady={true} // REFACTOR 1.2: Hardcode to true
                     isEmbedderReady={isEmbedderReady}
                     onEmbedFile={handleEmbedFile}
                     onIngestRepo={handleIngestRepo}

@@ -91,6 +91,60 @@ export const DATA_ANALYST_TOOL: FunctionDeclaration = {
     parameters: DATA_ANALYST_SCHEMA,
 };
 
+// --- NEW TOOLS FOR RELIABILITY (REFACTOR 2.1) ---
+
+const RERANKER_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      reranked_chunks: {
+        type: Type.ARRAY,
+        description: "The array of reranked chunks, ordered by relevance.",
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            documentName: { type: Type.STRING },
+            chunkContent: { type: Type.STRING },
+            rerankScore: { type: Type.NUMBER },
+          },
+          required: ['documentName', 'chunkContent', 'rerankScore'],
+        },
+      },
+    },
+    required: ['reranked_chunks'],
+};
+
+export const RERANKER_TOOL: FunctionDeclaration = {
+    name: 'submit_reranked_chunks',
+    description: 'Submit the final, reranked, and scored document chunks.',
+    parameters: RERANKER_SCHEMA,
+};
+
+const VERIFIER_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      results: {
+        type: Type.ARRAY,
+        description: "The array of validation results for each plan step.",
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            step_id: { type: Type.NUMBER },
+            status: { type: Type.STRING, enum: ["PASS", "FAIL"] },
+            reason: { type: Type.STRING },
+          },
+          required: ['step_id', 'status', 'reason'],
+        },
+      },
+    },
+    required: ['results'],
+};
+
+export const VERIFIER_TOOL: FunctionDeclaration = {
+    name: 'submit_verification_results',
+    description: 'Submit the final array of plan step verification results.',
+    parameters: VERIFIER_SCHEMA,
+};
+
 
 // --- END SOTA IMPROVEMENT ---
 
@@ -165,38 +219,26 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
   },
   [TaskType.Code]: {
     model: 'gemini-2.5-pro',
-    title: 'Code Agent (PoT + Reflexion)',
-    description: 'Generates and autonomously debugs Python code.',
-    concise_description: 'Generates & debugs Python code.',
-    strengths: 'Uses a Reflexion loop to self-debug. Outputs in a robust XML/CDATA format.',
+    title: 'Code Agent (Native Execution)',
+    description: 'Generates and executes Python code using the native GAIS sandbox.',
+    concise_description: 'Generates & runs Python code.',
+    strengths: 'Uses the native, secure GAIS code_execution tool. No client-side Pyodide required.',
     weaknesses: 'Only runs Python. Cannot install new libraries.',
     example_prompt: '`/code` calculate the fibonacci sequence up to 20 and print it.',
-    tools: [],
+    tools: [{ functionDeclarations: [CODE_INTERPRETER_TOOL] }], // REFACTOR 1.2
     config: {},
-    systemInstruction: `IDENTITY: You are a 'Code Agent' (v4.0) with a 'Reflexion' loop.
-    OBJECTIVE: To write and execute correct Python code.
+    systemInstruction: `IDENTITY: You are a 'Code Agent' (v4.1).
+    OBJECTIVE: To write and execute correct Python code to solve the user's request.
     
     PROCEDURE (Program-of-Thought):
     1.  **Thought:** Analyze the user's request: {prompt}.
-    2.  **Act:** Respond with the Python code to solve the request, formatted *only* in the XML/CDATA protocol.
+    2.  **Act:** You MUST call the \`code_interpreter\` tool with the correct Python code to solve the request.
     
     PROCEDURE (Reflexion Loop - If you receive failed code):
     1.  **Analyze Failure:** You will be given [Failed Code] and [Error Message].
     2.  **Thought:** Analyze the error.
     3.  **Refine:** Write the corrected, debugged Python code.
-    4.  **Act (Retry):** Respond with the *new* code, formatted *only* in the XML/CDATA protocol.
-
-    OUTPUT FORMAT (MANDATORY):
-    Your entire response MUST be the XML/CDATA block. DO NOT add any conversational filler, markdown, or explanatory text.
-    <changes>
-      <change>
-        <file>main.py</file>
-        <description>Python code to solve the user request.</description>
-        <content><![CDATA[
-# ... your python code ...
-]]></content>
-      </change>
-    </changes>`
+    4.  **Act (Retry):** You MUST call the \`code_interpreter\` tool with the *new* corrected code.`
   },
    [TaskType.Critique]: {
     model: 'gemini-2.5-flash',
@@ -367,37 +409,19 @@ PROCEDURE:
     strengths: 'Emulates a fine-tuned BERT reranker to score retrieved chunks, significantly improving RAG quality.',
     weaknesses: 'Not user-facing. Only scores, does not synthesize.',
     example_prompt: 'This agent is not user-facing.',
-    tools: [],
+    tools: [{ functionDeclarations: [RERANKER_TOOL] }], // REFACTOR 2.1
     config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          reranked_chunks: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                documentName: { type: Type.STRING },
-                chunkContent: { type: Type.STRING },
-                rerankScore: { type: Type.NUMBER },
-              },
-              required: ['documentName', 'chunkContent', 'rerankScore'],
-            },
-          },
-        },
-        required: ['reranked_chunks'],
-      },
+      // REFACTOR 2.1: Remove brittle JSON config
     },
     systemInstruction: `IDENTITY: You are a 'Reranker' agent, emulating a BERT Cross-Encoder.
-    OBJECTIVE: You will be given a [User Query] and a list of [Retrieved Chunks]. Your *only* job is to score each chunk for its relevance to the query and return a JSON object.
+    OBJECTIVE: You will be given a [User Query] and a list of [Retrieved Chunks]. Your *only* job is to score each chunk for its relevance to the query and call the \`submit_reranked_chunks\` tool.
     PROCEDURE:
     1.  Analyze the [User Query].
     2.  For each [Retrieved Chunk], assign a 'rerankScore' from 0.0 (not relevant) to 1.0 (perfectly relevant).
     3.  A score of 1.0 means the chunk *directly* answers the query.
     4.  A score of 0.5 means the chunk mentions *keywords* but does not answer the query.
     5.  A score of 0.0 means the chunk is irrelevant.
-    6. Your entire response MUST be the JSON object. DO NOT add any conversational filler, markdown, or explanatory text.
+    6. Your entire response MUST be to call the \`submit_reranked_chunks\` tool with the JSON object. DO NOT add any conversational filler.
     
     [User Query]: {query}
     [Retrieved Chunks]: {chunks_json}`
@@ -410,30 +434,12 @@ PROCEDURE:
     strengths: 'Fast, low-cost. Acts as a proactive safety gate (PVE). Validates all plan steps in a single batch call.',
     weaknesses: 'Not user-facing. Can only perform logical and schema checks.',
     example_prompt: 'This agent is not user-facing.',
-    tools: [],
+    tools: [{ functionDeclarations: [VERIFIER_TOOL] }], // REFACTOR 2.1
     config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          results: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                step_id: { type: Type.NUMBER },
-                status: { type: Type.STRING, enum: ["PASS", "FAIL"] },
-                reason: { type: Type.STRING },
-              },
-              required: ['step_id', 'status', 'reason'],
-            },
-          },
-        },
-        required: ['results'],
-      },
+      // REFACTOR 2.1: Remove brittle JSON config
     },
     systemInstruction: `IDENTITY: You are a 'Verifier' agent (v4.1). You are a non-creative, deterministic batch auditor.
-    OBJECTIVE: You will receive a JSON object containing an array of 'PlanSteps'. Your *only* job is to validate *each* step against a list of rules and return an array of results.
+    OBJECTIVE: You will receive a JSON object containing an array of 'PlanSteps'. Your *only* job is to validate *each* step against a list of rules and call the \`submit_verification_results\` tool.
     
     RULES:
     1.  **Tool Check:** The 'tool_to_use' MUST be a valid, existing TaskType (e.g., 'Code', 'Research').
@@ -444,7 +450,7 @@ PROCEDURE:
     1.  Analyze the incoming array of [PlanSteps].
     2.  For each step, check against all RULES.
     3.  Construct a result object for each step: {"step_id": <id>, "status": "PASS|FAIL", "reason": "..."}.
-    4. Your entire response MUST be the JSON object containing the results array. DO NOT add any conversational filler, markdown, or explanatory text.
+    4. Your entire response MUST be to call the \`submit_verification_results\` tool with the JSON object. DO NOT add any conversational filler.
     
     [PlanSteps]: {plan_steps_json_array}`
   },

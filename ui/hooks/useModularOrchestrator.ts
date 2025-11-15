@@ -2,7 +2,7 @@
 import React, { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'; 
 import { GoogleGenAI, Chat, Part, GenerateContentResponse, Content } from '@google/genai';
 import { ChatMessage, TaskType, FileData, Persona, Plan, PlanStep, FunctionCall, CritiqueResult, GroundingSource, AgenticState, WorkflowState, WorkflowStepState, SwarmMode, VizSpec, RagSource, ReflexionEntry } from '../../types';
-import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL, SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL } from '../../constants'; // SOTA: Import SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL
+import { APP_VERSION, AGENT_ROSTER, PERSONA_CONFIGS, ROUTER_SYSTEM_INSTRUCTION, ROUTER_TOOL, SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL, RERANKER_TOOL, VERIFIER_TOOL } from '../../constants'; // SOTA: Import SOTA_SECURITY_PIPELINE, CRITIQUE_TOOL
 import { extractSources, fileToGenerativePart } from './helpers';
 import { agentGraphConfigs } from '../components/graphConfigs';
 import { useDB } from './useDB';
@@ -32,39 +32,6 @@ const initialState: OrchestratorState = {
     messages: [],
     agenticState: {},
     isLoading: false,
-};
-
-const parseCodeFromXML = (xmlString: string): { code: string, error: string | null } => {
-    try {
-        const contentMatch = xmlString.match(/<content>([\s\S]*?)<\/content>/);
-        if (!contentMatch || !contentMatch[1]) {
-            if (!xmlString.trim().startsWith('<')) return { code: xmlString, error: null };
-            throw new Error("No <content> tag found.");
-        }
-        let content = contentMatch[1].trim();
-        if (content.startsWith("<![CDATA[") && content.endsWith("]]>")) {
-            content = content.substring(9, content.length - 3).trim();
-            return { code: content, error: null };
-        }
-        content = content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-        return { code: content, error: null };
-    } catch (e) {
-        const error = e as Error;
-        return { code: "", error: `[ERROR: Code agent did not return valid XML/CDATA: ${error.message}]` };
-    }
-};
-
-// SOTA: This function is brittle and a major failure point.
-// We are refactoring to remove reliance on it where possible.
-const safeJsonParse = (jsonString: string): { data: any, error: string | null } => {
-    try {
-        const jsonMatch = jsonString.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-        if (!jsonMatch) throw new Error("No JSON object or array found in the string.");
-        return { data: JSON.parse(jsonMatch[0]), error: null };
-    } catch (e) {
-        const error = e as Error;
-        return { data: null, error: `JSON parsing failed: ${error.message}. Raw output:\n\n${jsonString}`};
-    }
 };
 
 const orchestratorReducer = (state: OrchestratorState, action: Action): OrchestratorState => {
@@ -150,7 +117,6 @@ export const useModularOrchestrator = (
     persona: Persona,
     swarmMode: SwarmMode,
     activeRoster: TaskType[],
-    pyodideRef: React.MutableRefObject<any>
 ) => {
     const [state, dispatch] = useReducer(orchestratorReducer, initialState);
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY as string }), []);
@@ -188,18 +154,6 @@ export const useModularOrchestrator = (
         if (manageLoadingState) dispatch({ type: 'SET_LOADING', payload: false });
         throw e;
     }, [dispatch]);
-
-    const runPythonCode = async (code: string): Promise<{ success: boolean; output: string; error?: string }> => {
-        if (!pyodideRef.current) return { success: false, output: "", error: "Pyodide is not initialized." };
-        try {
-            pyodideRef.current.runPython(`import sys, io; sys.stdout = io.StringIO()`);
-            const result = await pyodideRef.current.runPythonAsync(code);
-            const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
-            return { success: true, output: stdout || result?.toString() || "Code executed without output." };
-        } catch (e) {
-            return { success: false, output: "", error: (e as Error).message };
-        }
-    };
     
     const getChat = (taskType: TaskType, history: ChatMessage[] = []): Chat => {
         const agentConfig = AGENT_ROSTER[taskType];
@@ -248,12 +202,13 @@ export const useModularOrchestrator = (
             const rerankerPrompt = AGENT_ROSTER[TaskType.Reranker].systemInstruction.replace('{query}', prompt).replace('{chunks_json}', JSON.stringify(ragSources.map(r => ({ documentName: r.documentName, chunkContent: r.chunkContent }))));
             const rerankMsg = await handleSendMessageInternal(rerankerPrompt, undefined, undefined, TaskType.Reranker, true, false);
             
-            const { data: parsed, error } = safeJsonParse(rerankMsg.content); // SOTA: Reranker still uses brittle JSON, this is a candidate for tool use refactor.
-            if (error || !parsed.reranked_chunks) {
-                console.error("Reranker failed to return valid JSON:", error || "Missing 'reranked_chunks' key.");
+            // REFACTOR 2.1: Use tool call instead of JSON parsing
+            const rerankCall = rerankMsg.functionCalls?.find(fc => fc.name === RERANKER_TOOL.name);
+            if (!rerankCall?.args.reranked_chunks) {
+                console.error("Reranker failed to return valid tool call:", rerankMsg);
                 ragSources = ragSources.slice(0, 5); // Fallback to vector search
             } else {
-                ragSources = parsed.reranked_chunks
+                ragSources = rerankCall.args.reranked_chunks
                     .map((c: any) => ({ documentName: c.documentName, chunkContent: c.chunkContent, rerankScore: c.rerankScore }))
                     .sort((a: RagSource, b: RagSource) => (b.rerankScore || 0) - (a.rerankScore || 0))
                     .slice(0, 5);
@@ -435,12 +390,15 @@ export const useModularOrchestrator = (
             dispatch({ type: 'UPDATE_ASSISTANT_MESSAGE', payload: { messageId: plan.id, update: { content: "Validating plan..." } } });
             pendingSteps.forEach(step => dispatch({ type: 'UPDATE_PLAN_STEP', payload: { planId: plan.id, stepId: step.step_id, status: 'in-progress', result: 'Validating...' } }));
             
-            // SOTA: Verifier also uses brittle JSON. This is another candidate for tool use refactor, but we leave it for now.
             const validationPrompt = AGENT_ROSTER[TaskType.Verifier].systemInstruction.replace('{plan_steps_json_array}', JSON.stringify(pendingSteps));
             const validationMsg = await handleSendMessageInternal(validationPrompt, undefined, undefined, TaskType.Verifier, true, false);
             
-            const { data: parsed, error } = safeJsonParse(validationMsg.content);
-            if (error || !parsed.results) throw new Error(`Plan validation failed: Verifier agent returned invalid JSON. ${error}`);
+            // REFACTOR 2.1: Use tool call instead of JSON parsing
+            const validationCall = validationMsg.functionCalls?.find(fc => fc.name === VERIFIER_TOOL.name);
+            if (!validationCall?.args.results) {
+                throw new Error(`Plan validation failed: Verifier agent returned invalid tool call. ${validationMsg.content}`);
+            }
+            const parsed = validationCall.args;
             
             let failedValidations = 0;
             parsed.results.forEach((res: { step_id: number; status: "PASS" | "FAIL"; reason: string; }) => {
@@ -504,13 +462,7 @@ export const useModularOrchestrator = (
                     const { step, resultMessage } = result.value;
                     let outputData = resultMessage.content;
                     
-                    if (step.tool_to_use === TaskType.Code) {
-                        const { code, error } = parseCodeFromXML(outputData); // Code agent uses robust XML
-                        if (error) { throw new Error(error); } 
-                        const codeResult = await runPythonCode(code);
-                        outputData = codeResult.success ? codeResult.output : `Execution Failed: ${codeResult.error}`;
-                        if (!codeResult.success) { throw new Error(outputData); }
-                    }
+                    // REFACTOR 1.2: The Code agent now returns its output directly as content. No client-side execution needed.
                     
                     // SOTA: Check for DataAnalyst tool call
                     if (step.tool_to_use === TaskType.DataAnalyst) {
@@ -561,7 +513,7 @@ export const useModularOrchestrator = (
         dispatch({ type: 'SET_AGENTIC_STATE', payload: { activePlanId: undefined } });
         dispatch({ type: 'SET_LOADING', payload: false });
         return finalResult;
-    }, [handleSendMessageInternal, dispatch, runPythonCode, generateEmbedding, findSimilar, initiateSelfCorrection]);
+    }, [handleSendMessageInternal, dispatch, generateEmbedding, findSimilar, initiateSelfCorrection]);
     
 
     // SOTA: New function to implement Opportunity 1

@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react';
 import { FileData, TaskType } from '../../types';
 import { readFileAsBase64 } from '../hooks/helpers';
 import { SendIcon, PaperclipIcon, XCircleIcon, GitHubIcon } from '../../components/Icons';
+import { useAppContext } from '../context/AppProvider'; // Import the context hook
 
 const gitHubRepoRegex = /https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/;
 
@@ -19,21 +20,24 @@ const ALLOWED_TEXT_MIME_TYPES = [
   'text/javascript',
 ];
 
+// All props are removed
+export const ChatInput: React.FC = () => {
+  // Get all state and handlers from the global context
+  const {
+    handleSendMessage,
+    isLoading,
+    isEmbedderReady,
+    handleEmbedFile,
+    handleIngestRepo,
+    embeddingStatus
+  } = useAppContext();
 
-export const ChatInput: React.FC<{
-  onSendMessage: (prompt: string, file?: FileData, repoUrl?: string, forcedTask?: TaskType) => void;
-  isLoading: boolean;
-  isPyodideReady: boolean;
-  isEmbedderReady: boolean;
-  onEmbedFile: (docName: string, text: string) => Promise<void>;
-  onIngestRepo: (url: string) => Promise<void>;
-  embeddingStatus: { title: string, progress: number, total: number } | null;
-}> = ({ onSendMessage, isLoading, isPyodideReady, isEmbedderReady, onEmbedFile, onIngestRepo, embeddingStatus }) => {
   const [prompt, setPrompt] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const isEmbedding = !!embeddingStatus;
+  const isPyodideReady = true; // Pyodide is removed, assume always ready
 
   const commandPaletteRoutes = [
       { command: '/code', task: TaskType.Code, desc: 'Generate or execute code' },
@@ -50,7 +54,7 @@ export const ChatInput: React.FC<{
   };
 
   const handleCommandSelect = (task: TaskType, command: string) => {
-      onSendMessage(prompt.replace(command, '').trim(), undefined, undefined, task);
+      handleSendMessage(prompt.replace(command, '').trim(), undefined, undefined, task);
       setPrompt('');
       setShowCommandPalette(false);
   }
@@ -64,9 +68,9 @@ export const ChatInput: React.FC<{
         
         const commandMatch = commandPaletteRoutes.find(r => prompt.startsWith(r.command));
         if (commandMatch) {
-          onSendMessage(prompt.replace(commandMatch.command, '').trim(), fileData, undefined, commandMatch.task);
+          handleSendMessage(prompt.replace(commandMatch.command, '').trim(), fileData, undefined, commandMatch.task);
         } else {
-          onSendMessage(prompt, fileData, undefined);
+          handleSendMessage(prompt, fileData, undefined);
         }
     
         setPrompt(''); setFile(null);
@@ -87,7 +91,7 @@ export const ChatInput: React.FC<{
         } else if (isTextForEmbedding) {
             try {
                 const text = await selectedFile.text();
-                await onEmbedFile(selectedFile.name, text);
+                await handleEmbedFile(selectedFile.name, text);
             } catch (err) {
                 const error = err as Error;
                 alert(`Failed to process ${selectedFile.name}. Error: ${error.message}`);
@@ -96,7 +100,6 @@ export const ChatInput: React.FC<{
             alert(`Unsupported file type: "${selectedFile.type}". Please select an image or a valid text file (.txt, .md, .csv, .json, .js, .py).`);
         }
 
-        // Clear the file input so the same file can be selected again
         if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -104,7 +107,7 @@ export const ChatInput: React.FC<{
   const handleRepoClick = async () => {
     const url = window.prompt("Enter GitHub repository URL (e.g., https://github.com/user/repo):");
     if (url && gitHubRepoRegex.test(url)) {
-        await onIngestRepo(url);
+        await handleIngestRepo(url);
     } else if (url) {
         alert("Invalid GitHub repository URL.");
     }

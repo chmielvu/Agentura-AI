@@ -1,41 +1,34 @@
 
 import React from 'react';
-import { Persona, SwarmMode, ChatMessage } from '../../types';
+import { SwarmMode } from '../../types';
 import { APP_TITLE } from '../../constants';
+import { useAppContext } from '../context/AppProvider'; // Import the context hook
 
-export const Header: React.FC<{
-  persona: Persona;
-  onPersonaChange: (persona: Persona) => void;
-  swarmMode: SwarmMode;
-  onSwarmModeChange: (mode: SwarmMode) => void;
-  isLoading: boolean;
-  isPyodideReady: boolean;
-  messages: ChatMessage[];
-  onShowGuide: () => void;
-  onExportSession: () => void;
-}> = ({ 
-    persona, 
-    onPersonaChange, 
-    swarmMode, 
-    onSwarmModeChange, 
-    isLoading, 
-    isPyodideReady, 
+// All props are removed
+export const Header: React.FC = () => {
+  // Get all state and handlers from the global context
+  const {
+    swarmMode,
+    // FIX: Corrected prop name to match context provider
+    handleSwarmModeChange,
+    isLoading,
     messages,
-    onShowGuide,
-    onExportSession
-}) => {
+    setIsGuideOpen,
+    handleExportSession
+  } = useAppContext();
+
   const lastMessage = messages[messages.length - 1];
   const currentTask = (isLoading && lastMessage?.taskType) ? lastMessage.taskType : 'Idle';
 
   const getStatusColor = () => {
     if (isLoading) return 'text-accent';
-    if (!isPyodideReady) return 'text-yellow-500';
+    // isPyodideReady is gone, assume always ready
     return 'text-green-500';
   };
 
   const getStatusText = () => {
     if (isLoading) return `EXECUTING (${currentTask})`;
-    if (!isPyodideReady) return 'INITIALIZING PYTHON';
+    // isPyodideReady is gone, assume always ready
     return 'READY';
   };
 
@@ -59,7 +52,7 @@ export const Header: React.FC<{
               {Object.values(SwarmMode).map((m) => (
                 <button
                   key={m}
-                  onClick={() => onSwarmModeChange(m)}
+                  onClick={() => handleSwarmModeChange(m)}
                   className={`px-2 py-1 text-xs font-medium rounded-sm transition-colors duration-200 ${
                     swarmMode === m ? 'bg-border text-foreground' : 'text-foreground/70 hover:bg-card'
                   }`}
@@ -71,13 +64,13 @@ export const Header: React.FC<{
             </div>
             
             <button 
-                onClick={onShowGuide} 
+                onClick={() => setIsGuideOpen(true)} 
                 className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
             >
                 Agentic Guide
             </button>
              <button 
-                onClick={onExportSession} 
+                onClick={handleExportSession} 
                 className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
             >
                 Export Session

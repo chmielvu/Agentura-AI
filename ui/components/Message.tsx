@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ChatMessage, FunctionCall, Plan, PlanStep, CritiqueResult, GroundingSource, RepoData, RagSource, TaskType } from '../../types';
+import { ChatMessage, FunctionCall, Plan, CritiqueResult, GroundingSource, RepoData, RagSource, TaskType } from '../../types';
 import { CodeBracketIcon, PerceptionIcon, CritiqueIcon, SearchIcon, PlayIcon, RetryIcon, GitHubIcon, BrainCircuitIcon, ClockIcon, CogIcon, CheckCircleIcon, XCircleIcon } from '../../components/Icons';
 import { Visualization } from './Visualization';
 import { AGENT_ROSTER } from '../../constants';
@@ -164,8 +164,6 @@ export const Message: React.FC<{
                         {call.isAwaitingExecution && (
                             <div className="px-4 py-2 border-t flex items-center gap-2">
                                 <button onClick={() => onExecuteCode(message.id, call.id)} className="text-xs bg-accent/80 hover:bg-accent text-white px-3 py-1 rounded-sm">Execute</button>
-                                {/* REFACTOR 1.2: Remove Debug button */}
-                                {/* <button onClick={() => onDebugCode(message.id, call.id)} className="text-xs bg-card hover:bg-border px-3 py-1 rounded-sm border">Debug</button> */}
                             </div>
                         )}
                     </div>

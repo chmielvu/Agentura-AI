@@ -1,25 +1,22 @@
 
 import React, { useState } from 'react';
-import { SwarmMode, TaskType, WorkflowState } from '../../types';
 import { CommandPalette } from './CommandPalette';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
 import { AgentRoster } from './AgentRoster';
 import { ArchiveManager } from './ArchiveManager';
+import { useAppContext } from '../context/AppProvider'; // Import the context hook
 
-interface ContextPanelProps {
-    swarmMode: SwarmMode;
-    activeRoster: TaskType[];
-    onRosterChange: (roster: TaskType[]) => void;
-    lastTask?: {
-        taskType: TaskType;
-        workflowState: WorkflowState;
-    } | null;
-    onShowAgentDetails: (agent: any) => void;
-}
+// All props are removed
+export const ContextPanel: React.FC = () => {
+    // Get all state and handlers from the global context
+    const {
+        swarmMode,
+        activeRoster,
+        setActiveRoster, // Renamed from onRosterChange
+        lastGraphableTask,
+        setExplainAgent // Renamed from onShowAgentDetails
+    } = useAppContext();
 
-type View = 'commands' | 'graph' | 'roster' | 'archive';
-
-export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
     const [activeTab, setActiveTab] = useState<View>('roster');
 
     const renderView = () => {
@@ -27,8 +24,8 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
             case 'commands':
                 return <CommandPalette />;
             case 'graph':
-                 return props.lastTask ? (
-                    <AgentGraphVisualizer taskType={props.lastTask.taskType} workflowState={props.lastTask.workflowState} />
+                 return lastGraphableTask ? (
+                    <AgentGraphVisualizer taskType={lastGraphableTask.taskType} workflowState={lastGraphableTask.workflowState} />
                 ) : (
                     <div className="text-center text-xs text-foreground/50 py-8">
                         No task has been run yet.
@@ -36,10 +33,10 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
                 );
             case 'roster':
                 return <AgentRoster 
-                            swarmMode={props.swarmMode} 
-                            activeRoster={props.activeRoster} 
-                            onRosterChange={props.onRosterChange}
-                            onShowAgentDetails={props.onShowAgentDetails}
+                            swarmMode={swarmMode} 
+                            activeRoster={activeRoster} 
+                            onRosterChange={setActiveRoster}
+                            onShowAgentDetails={setExplainAgent}
                        />;
             case 'archive': 
                 return <ArchiveManager />;
@@ -64,6 +61,8 @@ export const ContextPanel: React.FC<ContextPanelProps> = (props) => {
         </div>
     );
 };
+
+type View = 'commands' | 'graph' | 'roster' | 'archive';
 
 const TabButton: React.FC<{ name: string, view: View, activeTab: View, setActiveTab: (v: View) => void }> = 
 ({ name, view, activeTab, setActiveTab }) => (

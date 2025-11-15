@@ -1,281 +1,40 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Persona, SwarmMode, TaskType, WorkflowState, ChatMessage } from './types';
-import { useModularOrchestrator } from './ui/hooks/useModularOrchestrator';
+import React, { useRef, useEffect } from 'react';
 import { Header } from './ui/components/Header';
 import { Message } from './ui/components/Message';
 import { ChatInput } from './ui/components/ChatInput';
-// import DebuggerModal from './components/Debugger'; // REFACTOR 1.2: Removed
-import { agentGraphConfigs } from './ui/components/graphConfigs';
 import { ContextPanel } from './ui/components/ContextPanel';
-import { AGENT_ROSTER } from './constants';
 import { FeedbackModal } from './ui/components/FeedbackModal';
-import { useEmbeddingService } from './ui/hooks/useEmbeddingService';
 import { GuideModal } from './ui/components/GuideModal';
 import { ExplainAgentModal } from './ui/components/ExplainAgentModal';
 import { AestheticPanel } from './ui/components/AestheticPanel';
-
-const getInitialSwarmMode = () => (localStorage.getItem('agentic-swarm-mode') as SwarmMode) || SwarmMode.InformalCollaborators;
-
-// --- UPDATED v4.0 ---
-const INTERNAL_AGENTS = [
-    TaskType.Reranker,
-    TaskType.Embedder,
-    TaskType.Verifier,
-    TaskType.Retry,
-];
-const getInitialActiveRoster = () => {
-    const saved = localStorage.getItem('agentic-active-roster');
-    if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) {
-                // Filter out any internal agents that might have been saved by mistake
-                return (parsed as TaskType[]).filter(t => !INTERNAL_AGENTS.includes(t));
-            }
-        } catch (e) {
-            console.error("Failed to parse saved roster:", e);
-        }
-    }
-    // Default roster, filtered
-    return Object.values(TaskType).filter(t => !INTERNAL_AGENTS.includes(t));
-};
-// --- END UPDATE ---
-
-const gitHubRepoRegex = /https?:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)/;
+import { useAppContext } from './ui/context/AppProvider'; // Import the context hook
 
 const App: React.FC = () => {
-  const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem('agentic-chat-persona') as Persona) || Persona.Default);
-  const [swarmMode, setSwarmMode] = useState<SwarmMode>(getInitialSwarmMode);
-  const [activeRoster, setActiveRoster] = useState<TaskType[]>(getInitialActiveRoster);
-  
-  // REFACTOR 1.2: Remove all Pyodide state
-  // const pyodideRef = useRef<any>(null);
-  // const [isPyodideReady, setIsPyodideReady] = useState(false);
-  // const [debugSession, setDebugSession] = useState<{ code: string; onComplete: (output: string) => void; } | null>(null);
-  
-  const { state, setMessages, handleSendMessage, handleExecuteCode, handleExecutePlan, addSessionFeedback } = useModularOrchestrator(persona, swarmMode, activeRoster); // REFACTOR 1.2: Removed pyodideRef
-  const { messages, isLoading } = state;
+  // Get all state and handlers from the global context
+  const {
+    messages,
+    isLoading,
+    feedbackModal,
+    setFeedbackModal,
+    addSessionFeedback,
+    isGuideOpen,
+    setIsGuideOpen,
+    explainAgent,
+    setExplainAgent,
+    handleExecuteCode,
+    handleExecutePlan
+  } = useAppContext();
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  const [lastGraphableTask, setLastGraphableTask] = useState<{ taskType: TaskType; workflowState: WorkflowState } | null>(null);
-  const [feedbackModal, setFeedbackModal] = useState<{ msgId: string, taskType: TaskType } | null>(null);
-  
-  const [isGuideOpen, setIsGuideOpen] = useState(false);
-  const [explainAgent, setExplainAgent] = useState<any | null>(null);
-  const { isReady: isEmbedderReady, processAndEmbedDocument } = useEmbeddingService();
-  const [embeddingStatus, setEmbeddingStatus] = useState<{ title: string; progress: number; total: number } | null>(null);
-
-
-  useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, isLoading]);
-  useEffect(() => localStorage.setItem('agentic-chat-persona', persona), [persona]);
-  useEffect(() => localStorage.setItem('agentic-swarm-mode', swarmMode), [swarmMode]);
-  useEffect(() => localStorage.setItem('agentic-active-roster', JSON.stringify(activeRoster)), [activeRoster]);
 
   useEffect(() => {
-    const lastTaskWithMessage = [...messages]
-        .reverse()
-        .find(m => m.role === 'assistant' && m.taskType && m.workflowState && agentGraphConfigs[m.taskType]);
-    
-    if (lastTaskWithMessage) {
-        setLastGraphableTask({
-            taskType: lastTaskWithMessage.taskType as TaskType,
-            workflowState: lastTaskWithMessage.workflowState as WorkflowState,
-        });
-    }
-  }, [messages]);
-
-  // REFACTOR 1.2: Remove Pyodide loading logic
-  // useEffect(() => {
-  //   async function load() {
-  //     try {
-  //       const pyodide = await (window as any).loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/' });
-  //       pyodideRef.current = pyodide;
-  //       setIsPyodideReady(true);
-  //     } catch (e) { console.error("Pyodide loading failed:", e); }
-  //   }
-  //   load();
-  // }, []);
-  
-  useEffect(() => {
-    if (!isEmbedderReady) return;
-
-    const ingestGuide = async () => {
-        const isIngested = localStorage.getItem('agentic_guide_ingested_v2');
-        if (isIngested) return;
-
-        console.log("Ingesting Agentic Guide for the first time...");
-        try {
-            const guideFiles = [
-                'canvas_assets/guide/01_Introduction.md',
-                'canvas_assets/guide/02_Planning.md',
-                'canvas_assets/guide/03_Reflexion.md',
-                'canvas_assets/guide/04_RAG_and_Self_Augmentation.md',
-                'canvas_assets/guide/05_Reasoning_Patterns.md'
-            ];
-            
-            setEmbeddingStatus({ title: 'Ingesting Agentic Guide', progress: 0, total: guideFiles.length });
-            for (const [index, path] of guideFiles.entries()) {
-                setEmbeddingStatus({ title: `Ingesting: ${path.split('/').pop()}`, progress: index, total: guideFiles.length });
-                const response = await fetch(path);
-                if (!response.ok) throw new Error(`Failed to fetch ${path}`);
-                const text = await response.text();
-                await processAndEmbedDocument(path, text);
-            }
-            localStorage.setItem('agentic_guide_ingested_v2', 'true');
-            setEmbeddingStatus({ title: 'Guide Ingestion Complete!', progress: guideFiles.length, total: guideFiles.length });
-            setTimeout(() => setEmbeddingStatus(null), 1500);
-        } catch (e) {
-            console.error("Failed to ingest agentic guide:", e);
-            setEmbeddingStatus(null);
-        }
-    };
-    ingestGuide();
-  }, [isEmbedderReady, processAndEmbedDocument]);
-
-  const handleSwarmModeChange = (newMode: SwarmMode) => {
-    if (newMode === swarmMode) return;
-    if (messages.length > 0 && window.confirm("Changing swarm mode will clear the conversation. Continue?")) {
-        setMessages([]);
-    }
-    setSwarmMode(newMode);
-  };
-
-  const handlePersonaChange = (newPersona: Persona) => {
-    if (newPersona === persona) return;
-    setPersona(newPersona);
-  };
-  
-  // REFACTOR 1.2: Remove Debug handler
-  // const handleDebugCode = (messageId: string, functionCallId: string) => {
-  //   const msg = messages.find(m => m.id === messageId);
-  //   const fc = msg?.functionCalls?.find(f => f.id === functionCallId);
-  //   if (!msg || !fc || !pyodideRef.current) return;
-    
-  //   setDebugSession({
-  //     code: fc.args.code,
-  //     onComplete: (output: string) => {
-  //       handleExecuteCode(messageId, functionCallId, output);
-  //       setDebugSession(null);
-  //     },
-  //   });
-  // };
-  
-  const handleExportSession = () => {
-    const { messages } = state;
-    let markdownContent = `# Agentura AI Session\n\n*Exported on: ${new Date().toISOString()}*\n\n---\n\n`;
-
-    messages.forEach(msg => {
-        if (msg.role === 'user') {
-            markdownContent += `> **User:**\n> ${msg.content.replace(/\n/g, '\n> ')}\n\n`;
-        } else if (msg.role === 'assistant' && msg.content) {
-            markdownContent += `**Assistant (${msg.taskType || 'Chat'}):**\n${msg.content}\n\n`;
-        } else if (msg.plan) {
-            markdownContent += `**Assistant (Planner):**\n*Generated Plan:*\n`;
-            msg.plan.plan.forEach(step => {
-                markdownContent += `1.  **[${step.status.toUpperCase()}]** ${step.description} (Tool: ${step.tool_to_use})\n`;
-                if (step.result && step.status === 'completed') {
-                    markdownContent += `    * **Result:** \`${step.result.substring(0, 150).replace(/\n/g, ' ')}...\`\n`;
-                } else if (step.result && step.status === 'failed') {
-                    markdownContent += `    * **Failure:** \`${step.result}\`\n`;
-                }
-            });
-            markdownContent += `\n`;
-        }
-    });
-
-    const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `agentura-session-${Date.now()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleEmbedFile = async (docName: string, text: string) => {
-    setEmbeddingStatus({ title: `Embedding ${docName}`, progress: 0, total: 1 });
-    try {
-      await processAndEmbedDocument(docName, text, ({ current, total }) => {
-        setEmbeddingStatus({ title: `Embedding ${docName}`, progress: current, total });
-      });
-      setEmbeddingStatus({ title: `Embedded ${docName}`, progress: 1, total: 1 });
-      setTimeout(() => setEmbeddingStatus(null), 1500);
-    } catch (e) {
-      console.error(e);
-      alert(`Failed to embed ${docName}.`);
-      setEmbeddingStatus(null);
-    }
-  };
-
-  const handleIngestRepo = async (url: string) => {
-    const match = url.match(gitHubRepoRegex);
-    if (!match) return;
-
-    const [_, owner, repo] = match;
-    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`;
-
-    try {
-        setEmbeddingStatus({ title: `Fetching repo tree for ${repo}...`, progress: 0, total: 1 });
-        const treeResponse = await fetch(treeUrl);
-        if (!treeResponse.ok) throw new Error(`GitHub API error: ${treeResponse.statusText}`);
-        const treeData = await treeResponse.json();
-
-        if (!treeData.tree || !Array.isArray(treeData.tree)) {
-            throw new Error("Could not parse repository file tree. The repository might be empty or invalid.");
-        }
-
-        const filesToIngest = treeData.tree
-            .map((file: any) => file.path)
-            .filter((path: string) => 
-                (path.endsWith('.md') || path.endsWith('.ts') || path.endsWith('.js') || path.endsWith('.py') || path.endsWith('.txt')) && !path.includes('node_modules')
-            );
-
-        if (filesToIngest.length === 0) {
-            alert("No ingestible files (.md, .ts, .js, .py, .txt) found in the main branch.");
-            setEmbeddingStatus(null);
-            return;
-        }
-
-        if (window.confirm(`Ingest ${filesToIngest.length} relevant files from ${repo}? This may take a moment.`)) {
-            setEmbeddingStatus({ title: `Fetching ${filesToIngest.length} files...`, progress: 0, total: filesToIngest.length });
-            
-            const filePromises = filesToIngest.map(path => 
-              fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`)
-                .then(res => res.ok ? res.text() : Promise.reject(new Error(`Failed to fetch ${path}`)))
-                .then(text => ({ path, text }))
-            );
-            
-            const results = await Promise.allSettled(filePromises);
-            const validFiles = results
-              .filter(r => r.status === 'fulfilled')
-              .map(r => (r as PromiseFulfilledResult<{path: string, text: string}>).value);
-
-            setEmbeddingStatus({ title: `Embedding ${validFiles.length} files...`, progress: 0, total: validFiles.length });
-            for (let i = 0; i < validFiles.length; i++) {
-                const { path, text } = validFiles[i];
-                setEmbeddingStatus({ title: `Embedding: ${path}`, progress: i + 1, total: validFiles.length });
-                await processAndEmbedDocument(path, text);
-            }
-
-            setEmbeddingStatus({ title: 'Ingestion complete!', progress: validFiles.length, total: validFiles.length });
-            setTimeout(() => setEmbeddingStatus(null), 1500);
-        } else {
-            setEmbeddingStatus(null);
-        }
-    } catch (e) {
-        const error = e as Error;
-        alert(`Failed to fetch repository. Error: ${error.message}`);
-        setEmbeddingStatus(null);
-    }
-  };
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
   return (
     <div className="h-screen w-screen flex flex-row bg-background text-foreground font-mono">
-      {/* REFACTOR 1.2: Remove DebuggerModal */}
-      {/* {debugSession && (
-        <DebuggerModal {...debugSession} pyodide={pyodideRef.current} onClose={() => setDebugSession(null)} />
-      )} */}
+      {/* Modals are now driven by global state */}
       {feedbackModal && (
           <FeedbackModal
               taskType={feedbackModal.taskType}
@@ -299,29 +58,15 @@ const App: React.FC = () => {
       <div className="w-[350px] flex-shrink-0 flex flex-col border-r border-border">
           <AestheticPanel />
           <div className="flex-1 overflow-y-auto">
-              <ContextPanel 
-                swarmMode={swarmMode}
-                activeRoster={activeRoster}
-                onRosterChange={setActiveRoster}
-                lastTask={lastGraphableTask}
-                onShowAgentDetails={setExplainAgent}
-              />
+              {/* ContextPanel now consumes state internally */}
+              <ContextPanel />
           </div>
       </div>
       
       {/* RIGHT COLUMN */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header
-          persona={persona}
-          onPersonaChange={handlePersonaChange}
-          swarmMode={swarmMode}
-          onSwarmModeChange={handleSwarmModeChange}
-          isLoading={isLoading}
-          isPyodideReady={true} // REFACTOR 1.2: Hardcode to true
-          messages={messages}
-          onShowGuide={() => setIsGuideOpen(true)}
-          onExportSession={handleExportSession}
-        />
+        {/* Header now consumes state internally */}
+        <Header />
         
         <div className="flex-1 flex flex-col overflow-hidden">
             <main className="flex-1 overflow-y-auto p-4 flex flex-col">
@@ -336,7 +81,7 @@ const App: React.FC = () => {
                         <Message
                             key={msg.id}
                             message={msg}
-                            onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId)}
+                            onExecuteCode={(msgId, fcId) => handleExecuteCode(msgId, fcId, undefined)}
                             onExecutePlan={(plan) => handleExecutePlan(plan, [])}
                             onRetryPlan={(plan) => handleExecutePlan(plan, [])}
                             onRequestFeedback={(msgId, taskType) => setFeedbackModal({ msgId, taskType })}
@@ -348,15 +93,8 @@ const App: React.FC = () => {
             </main>
             
             <footer className="border-t border-border">
-                <ChatInput 
-                    onSendMessage={handleSendMessage} 
-                    isLoading={isLoading} 
-                    isPyodideReady={true} // REFACTOR 1.2: Hardcode to true
-                    isEmbedderReady={isEmbedderReady}
-                    onEmbedFile={handleEmbedFile}
-                    onIngestRepo={handleIngestRepo}
-                    embeddingStatus={embeddingStatus}
-                />
+                {/* ChatInput now consumes state internally */}
+                <ChatInput />
             </footer>
         </div>
       </div>

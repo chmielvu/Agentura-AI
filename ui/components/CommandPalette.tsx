@@ -14,6 +14,7 @@ import {
     WrenchScrewdriverIcon,
 } from '../../components/Icons';
 
+// FIX: Add missing TaskTypes to satisfy Record<TaskType, ...>
 const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Planner]: PlanIcon,
     [TaskType.Research]: SearchIcon,
@@ -31,6 +32,8 @@ const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Embedder]: BrainCircuitIcon, // Not shown
     [TaskType.Reranker]: BrainCircuitIcon, // Not shown
     [TaskType.Verifier]: BrainCircuitIcon, // Not shown
+    [TaskType.Supervisor]: BrainCircuitIcon, // Not shown
+    [TaskType.Router]: BrainCircuitIcon, // Not shown
 };
 
 const commandsToShow = [

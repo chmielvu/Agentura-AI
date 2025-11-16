@@ -70,14 +70,17 @@ export const useDB = () => {
         return await db.chunks.put(chunk);
     };
 
-    const findSimilar = async (queryVector: number[], topK = 5) => {
+    const findSimilar = async (queryVector: number[], topK = 5, sourceFilter?: string) => {
         if (!queryVector || queryVector.length === 0) return [];
         
         // --- SOTA IMPROVEMENT (OPPORTUNITY 3): PERFORMANCE WARNING ---
         // This is a brute-force O(n) scan. It will not scale beyond a few thousand chunks.
         // A production-grade solution would use an optimized index (e.g., HNSWlib) or a server-side vector DB.
-        const allChunks = await db.chunks.toArray();
-        if (allChunks.length > 1000) {
+        const allChunks = await (sourceFilter
+            ? db.chunks.where('source').equals(sourceFilter).toArray()
+            : db.chunks.toArray());
+
+        if (allChunks.length > 1000 && !sourceFilter) {
             console.warn(`[PERFORMANCE WARNING] Client-side vector search is scanning ${allChunks.length} chunks. This will be slow. Consider implementing a server-side vector DB or a client-side HNSW index.`);
         }
         // --- END SOTA IMPROVEMENT ---

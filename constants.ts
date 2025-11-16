@@ -8,11 +8,13 @@ import {
     VEO_TOOL,
     MUSICFX_TOOL,
     CREATE_SOTA_METAPROMPT_TOOL,
-    AUTONOMOUS_RAG_TOOL // MANDATE 2.2
+    AUTONOMOUS_RAG_TOOL, // MANDATE 2.2
+    SUPERVISOR_ROUTER_TOOL,
 } from './ui/hooks/toolDefinitions';
 import { Type, FunctionDeclaration } from '@google/genai'; // Import FunctionDeclaration
 
-export { ROUTER_TOOL };
+// FIX: Export SUPERVISOR_ROUTER_TOOL
+export { ROUTER_TOOL, SUPERVISOR_ROUTER_TOOL };
 
 export const APP_TITLE = "Agentura AI";
 export const APP_VERSION = "4.3.0"; // Operator Overhaul
@@ -156,7 +158,7 @@ CONSTRAINTS:
 - You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
 - Simple follow-ups (e.g., "why?") about a complex topic MUST be routed to the previous specialist agent (e.g., 'Research', 'Code'), NOT 'Chat'.
 - If a query is unclear, you MUST route to 'Chat' and ask for HITL clarification.
-- Do not route to 'Verifier', 'Reranker', 'Embedder', or 'Retry' as they are internal system agents.
+- Do not route to 'Verifier', 'Reranker', 'Embedder', 'Retry', or 'Supervisor' as they are internal system agents.
 
 Available Routes:
 - 'Chat': For simple greetings, formatting, casual conversation, or refused queries.
@@ -174,8 +176,33 @@ Available Routes:
 Based on the user's query and history, choose the most appropriate route and score its complexity.
 `;
 
+export const SUPERVISOR_SYSTEM_INSTRUCTION = `IDENTITY: You are the "Supervisor," a deterministic, state-machine router (v4.3).
+OBJECTIVE: Your *only* job is to analyze the current \`GraphState\` and route to the single next agent.
+PROCEDURE:
+1.  **Analyze State:** Review the \`originalPrompt\`, \`plan\`, \`history\`, and \`lastOutput\`.
+2.  **Check for Failure:** If \`lastOutput\` contains a clear error, route to \`Critique\`.
+3.  **Check for Plan:**
+    * If \`plan\` is null, route to \`Planner\` to create one.
+    * If \`plan\` is not null and all steps are 'completed', route to \`A_FINAL\`.
+    * If \`plan\` is not null and has pending steps, route to the \`tool_to_use\` for the *next* pending step (e.g., \`Research\`, \`Code\`).
+4.  **Check for Critique:** If \`lastOutput\` is from the \`Critique\` agent, route to the \`Planner\` to *re-plan* and fix the critique.
+5.  **DECIDE:** Call the \`route_next_step\` tool with your decision.
+
+**CURRENT GRAPH STATE:**
+{graph_state_json}
+`;
+
 // Defines all available specialist agents in the system
 export const AGENT_ROSTER: Record<TaskType, any> = {
+  [TaskType.Supervisor]: {
+    model: 'gemini-2.5-flash', // Must be fast
+    title: 'Supervisor',
+    description: 'Internal agent. Manages the graph state.',
+    concise_description: '(Internal) Graph state manager.',
+    tools: [{ functionDeclarations: [SUPERVISOR_ROUTER_TOOL] }],
+    config: {},
+    systemInstruction: SUPERVISOR_SYSTEM_INSTRUCTION,
+  },
   [TaskType.Planner]: {
     model: 'gemini-2.5-pro',
     title: 'Planner Agent (ToT)',
@@ -188,16 +215,22 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     config: {
       // SOTA: Remove responseMimeType and responseSchema
     },
-    systemInstruction: `IDENTITY: You are a 'SOTA Planner Agent' (v4.0).
-    OBJECTIVE: To generate the *most optimal* JSON plan to achieve the user's goal.
+    systemInstruction: `IDENTITY: You are a 'SOTA Planner Agent' (v4.3).
+    OBJECTIVE: To generate or refine a JSON plan to achieve the goal defined in the \`GraphState\`.
     CONTEXT (PAST LESSONS):
     {past_lessons}
 
+    GRAPH STATE:
+    {graph_state_json}
+
     PROCEDURE (Internal Deliberation - PWC-ToT):
-    1.  [PLAN - ToT]: First, internally and silently, generate 2-3 distinct, competing strategies.
-    2.  [CRITIQUE - PWC]: Second, internally and silently, critique all plans.
-    3.  [SELECT]: Third, select the single best plan.
-    4.  [OUTPUT]: Your final output MUST be to call the \`submit_plan\` tool with the selected, optimal plan.` // SOTA: Update prompt
+    1.  **Analyze State:** Review the \`originalPrompt\` and \`history\`.
+    2.  **Check for Critique:** If the \`lastOutput\` is a critique, your previous plan failed. You MUST generate a *new, corrected plan* that addresses the critique.
+    3.  **Generate Plan:** If no critique, generate the *most optimal* JSON plan to achieve the goal.
+    4.  [PLAN - ToT]: Internally generate 2-3 competing strategies.
+    5.  [CRITIQUE - PWC]: Internally critique all plans.
+    6.  [SELECT]: Select the single best plan.
+    7.  [OUTPUT]: Your final output MUST be to call the \`submit_plan\` tool with the selected, optimal plan.`
   },
   [TaskType.Research]: {
     model: 'gemini-2.5-pro',
@@ -475,6 +508,15 @@ PROCEDURE:
         - Obvious logical errors.
     4.  Provide a clear, concise report of your findings in markdown format.
     5.  If you find no issues, state that the "System is nominal."`
+  },
+  [TaskType.Router]: {
+    model: 'gemini-2.5-flash',
+    title: 'Router',
+    description: 'Internal agent. Routes tasks.',
+    concise_description: '(Internal) Routes tasks.',
+    tools: [],
+    config: {},
+    systemInstruction: ROUTER_SYSTEM_INSTRUCTION
   }
 };
 

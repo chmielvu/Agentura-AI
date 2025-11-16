@@ -16,6 +16,9 @@ export enum TaskType {
   Reranker = 'Reranker',
   Verifier = 'Verifier', // MANDATE 1.2
   Maintenance = 'Maintenance',
+  Supervisor = 'Supervisor',
+  // FIX: Add Router to TaskType enum
+  Router = 'Router',
 }
 
 export enum SwarmMode {
@@ -156,4 +159,20 @@ export interface SessionState {
   version: string;
   messages: ChatMessage[];
   agenticState: AgenticState;
+}
+
+// Represents a node in our execution graph.
+// It's either a specialist agent (TaskType) or a terminal state.
+export type GraphNode = TaskType | 'A_FINAL' | 'USER_INPUT';
+
+// This is the main "state" object that will be passed around the graph.
+// It's the "memory" of the Supervisor.
+export interface GraphState {
+  id: string; // The ID of the assistant message holding this graph
+  originalPrompt: string;
+  plan: Plan | null;
+  history: ChatMessage[]; // Internal history of the graph execution
+  lastOutput: any; // The raw output from the last-run agent
+  nextAgent: GraphNode; // The "pointer" for the state machine
+  error: string | null;
 }

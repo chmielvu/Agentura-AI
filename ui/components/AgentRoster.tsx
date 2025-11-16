@@ -18,6 +18,7 @@ import {
     MaintenanceSprite,
 } from '../../components/Icons';
 
+// FIX: Add missing TaskTypes to satisfy Record<TaskType, ...>
 export const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Planner]: PlannerSprite,
     [TaskType.Research]: ResearchSprite,
@@ -35,6 +36,8 @@ export const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Embedder]: BrainCircuitIcon, // Internal
     [TaskType.Reranker]: BrainCircuitIcon, // Internal
     [TaskType.Verifier]: BrainCircuitIcon, // Internal
+    [TaskType.Supervisor]: BrainCircuitIcon, // Internal
+    [TaskType.Router]: BrainCircuitIcon, // Internal
 };
 
 const SECURITY_SERVICE_ROSTER = [TaskType.Planner, TaskType.Research, TaskType.Code, TaskType.Critique];
@@ -45,6 +48,8 @@ const INTERNAL_AGENTS = [
     TaskType.Embedder,
     TaskType.Verifier,
     TaskType.Retry,
+    TaskType.Supervisor,
+    TaskType.Router,
 ];
 
 interface AgentRosterProps {

@@ -9,12 +9,13 @@ export const Header: React.FC = () => {
   // Get all state and handlers from the global context
   const {
     swarmMode,
-    // FIX: Corrected prop name to match context provider
     handleSwarmModeChange,
     isLoading,
     messages,
     setIsGuideOpen,
-    handleExportSession
+    handleExportSession,
+    theme, // NEW
+    toggleTheme // NEW
   } = useAppContext();
 
   const lastMessage = messages[messages.length - 1];
@@ -30,6 +31,14 @@ export const Header: React.FC = () => {
     if (isLoading) return `EXECUTING (${currentTask})`;
     // isPyodideReady is gone, assume always ready
     return 'READY';
+  };
+  
+  // NEW: Get display text for theme button
+  const getThemeText = () => {
+    if (theme === 'sb') return '[SB]';
+    if (theme === 'abw-light') return '[ABW-L]';
+    if (theme === 'abw-dark') return '[ABW-D]';
+    return '[THEME]';
   };
 
   return (
@@ -74,6 +83,14 @@ export const Header: React.FC = () => {
                 className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
             >
                 Export Session
+            </button>
+             {/* NEW THEME TOGGLE BUTTON */}
+            <button 
+                onClick={toggleTheme} 
+                className="text-xs border border-border/50 px-2 py-0.5 rounded-sm text-foreground/70 hover:text-white hover:border-white/70 transition-colors"
+                title="Toggle Theme"
+            >
+                {getThemeText()}
             </button>
         </div>
     </header>

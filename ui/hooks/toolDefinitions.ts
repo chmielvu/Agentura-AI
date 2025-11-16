@@ -11,7 +11,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             route: {
                 type: Type.STRING,
                 description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Verifier && t !== TaskType.Reranker && t !== TaskType.Embedder), // Internal agents
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Verifier && t !== TaskType.Reranker && t !== TaskType.Embedder && t !== TaskType.Supervisor), // Internal agents
             },
             complexity_score: {
                 type: Type.NUMBER,
@@ -130,4 +130,31 @@ export const CREATE_SOTA_METAPROMPT_TOOL: FunctionDeclaration = {
         },
         required: ['agent_role', 'agent_goal'],
     },
+};
+
+// A list of all possible nodes the Supervisor can route to.
+// We must filter out the Supervisor itself.
+const allGraphNodes = [
+  ...Object.values(TaskType).filter(t => t !== TaskType.Supervisor),
+  'A_FINAL'
+];
+
+export const SUPERVISOR_ROUTER_TOOL: FunctionDeclaration = {
+  name: 'route_next_step',
+  description: 'The Supervisor\'s decision. Route to the single next agent node in the graph.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      agent_to_call: {
+        type: Type.STRING,
+        description: 'The next agent to execute, or "A_FINAL" to finish.',
+        enum: allGraphNodes,
+      },
+      reasoning: {
+        type: Type.STRING,
+        description: 'A brief, 1-sentence justification for this routing decision.'
+      }
+    },
+    required: ['agent_to_call', 'reasoning'],
+  },
 };

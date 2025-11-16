@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { FileData, TaskType } from '../../types';
+import { FileData, TaskType, SwarmMode } from '../../types';
 import { readFileAsBase64 } from '../hooks/helpers';
 import { SendIcon, PaperclipIcon, XCircleIcon, GitHubIcon } from '../../components/Icons';
 import { useAppContext } from '../context/AppProvider'; // Import the context hook
@@ -29,7 +29,8 @@ export const ChatInput: React.FC = () => {
     isEmbedderReady,
     handleEmbedFile,
     handleIngestRepo,
-    embeddingStatus
+    embeddingStatus,
+    swarmMode // NEW: Consume swarmMode
   } = useAppContext();
 
   const [prompt, setPrompt] = useState('');
@@ -112,6 +113,20 @@ export const ChatInput: React.FC = () => {
         alert("Invalid GitHub repository URL.");
     }
   };
+  
+  // NEW: Dynamically set placeholder
+  const getPlaceholder = (): string => {
+    if (swarmMode === SwarmMode.InformalCollaborators) {
+      return "Describe your goal for the Planner or use '/' for commands...";
+    }
+    if (swarmMode === SwarmMode.SecurityService) {
+      return "State your objective for the Security pipeline...";
+    }
+    if (swarmMode === SwarmMode.TheRoundTable) {
+        return "Describe the creative topic for the Round Table debate...";
+    }
+    return "Type a message or '/' for commands...";
+  };
 
   return (
     <div className="bg-card p-4 border-t border-border relative">
@@ -162,7 +177,7 @@ export const ChatInput: React.FC = () => {
                 value={prompt}
                 onChange={handlePromptChange}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-                placeholder="Type a message or '/' for commands..."
+                placeholder={getPlaceholder()}
                 className="flex-grow bg-transparent text-foreground placeholder-foreground/50 focus:outline-none resize-none px-3 font-mono"
                 rows={1}
                 disabled={isLoading || !isPyodideReady || isEmbedding}

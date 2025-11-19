@@ -17,7 +17,7 @@ import { Type, FunctionDeclaration } from '@google/genai'; // Import FunctionDec
 export { ROUTER_TOOL, SUPERVISOR_ROUTER_TOOL };
 
 export const APP_TITLE = "Agentura AI";
-export const APP_VERSION = "4.3.0"; // Operator Overhaul
+export const APP_VERSION = "5.0.0"; // Gemini 3 Upgrade
 
 // --- SOTA IMPROVEMENT (OPPORTUNITY 2): Define tools for structured output ---
 
@@ -26,7 +26,7 @@ const PLAN_SCHEMA = {
   properties: {
     plan: {
       type: Type.ARRAY,
-      description: "The detailed, step-by-step plan.",
+      description: "The detailed, step-by-step plan, modeled as a Directed Acyclic Graph (DAG).",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -34,10 +34,11 @@ const PLAN_SCHEMA = {
           description: { type: Type.STRING },
           tool_to_use: { type: Type.STRING, enum: Object.values(TaskType) },
           acceptance_criteria: { type: Type.STRING },
+          dependencies: { type: Type.ARRAY, description: "Array of step_ids this step depends on. Use an empty array [] for steps that can run immediately.", items: { type: Type.NUMBER } },
           inputs: { type: Type.ARRAY, items: { type: Type.STRING } },
           output_key: { type: Type.STRING },
         },
-        required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria'],
+        required: ['step_id', 'description', 'tool_to_use', 'acceptance_criteria', 'dependencies'],
       },
     },
   },
@@ -151,8 +152,8 @@ export const VERIFIER_TOOL: FunctionDeclaration = {
 // --- END SOTA IMPROVEMENT ---
 
 
-export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v4.0).
-OBJECTIVE: Analyze the user's query in the context of the recent chat history. You must assess its complexity and select the single best downstream specialist agent to handle it.
+export const ROUTER_SYSTEM_INSTRUCTION = `IDENTITY: You are a high-speed, stateful task routing agent (v5.0).
+OBJECTIVE: Analyze the user's query in the context of the recent chat history provided. You must assess its complexity and select the single best downstream specialist agent to handle it.
 CONSTRAINTS:
 - You MUST choose from the available routes, which are the titles of the agents in the AGENT_ROSTER.
 - You MUST provide a complexity score from 1 (trivial) to 10 (extremely complex).
@@ -176,17 +177,19 @@ Available Routes:
 Based on the user's query and history, choose the most appropriate route and score its complexity.
 `;
 
-export const SUPERVISOR_SYSTEM_INSTRUCTION = `IDENTITY: You are the "Supervisor," a deterministic, state-machine router (v4.3).
-OBJECTIVE: Your *only* job is to analyze the current \`GraphState\` and route to the single next agent.
+export const SUPERVISOR_SYSTEM_INSTRUCTION = `IDENTITY: You are the "Supervisor," a deterministic, state-machine graph executor (v5.0).
+OBJECTIVE: Your *only* job is to analyze the current \`GraphState\` and determine the next step.
 PROCEDURE:
-1.  **Analyze State:** Review the \`originalPrompt\`, \`plan\`, \`history\`, and \`lastOutput\`.
-2.  **Check for Failure:** If \`lastOutput\` contains a clear error, route to \`Critique\`.
-3.  **Check for Plan:**
-    * If \`plan\` is null, route to \`Planner\` to create one.
-    * If \`plan\` is not null and all steps are 'completed', route to \`A_FINAL\`.
-    * If \`plan\` is not null and has pending steps, route to the \`tool_to_use\` for the *next* pending step (e.g., \`Research\`, \`Code\`).
-4.  **Check for Critique:** If \`lastOutput\` is from the \`Critique\` agent, route to the \`Planner\` to *re-plan* and fix the critique.
-5.  **DECIDE:** Call the \`route_next_step\` tool with your decision.
+1.  **Analyze State:** Review the \`originalPrompt\`, \`plan\`, and \`history\`.
+2.  **Check for Plan:**
+    *   If \`plan\` is null, route to \`Planner\` to create one.
+    *   If \`plan\` is not null:
+        a. Check if the plan contains a "Final Critique" step. If not, and all other steps are done, you MUST route to \`Critique\` to validate the result.
+        b. If the plan IS complete (including critique), route to \`A_FINAL\`.
+        c. If there are steps pending, but they are BLOCKED (dependencies not met) or FAILED, route to \`Planner\` to re-plan or \`Retry\` to fix.
+        d. NOTE: The execution engine handles parallel steps automatically. You are only called when the graph stops or needs a high-level decision.
+3.  **Check for Critique:** If \`lastOutput\` is from the \`Critique\` agent (indicating a failure or poor score), route to the \`Planner\` to *re-plan* and fix the critique.
+4.  **DECIDE:** Call the \`route_next_step\` tool with your decision.
 
 **CURRENT GRAPH STATE:**
 {graph_state_json}
@@ -195,7 +198,7 @@ PROCEDURE:
 // Defines all available specialist agents in the system
 export const AGENT_ROSTER: Record<TaskType, any> = {
   [TaskType.Supervisor]: {
-    model: 'gemini-2.5-flash', // Must be fast
+    model: 'gemini-2.5-flash', // Fast orchestration
     title: 'Supervisor',
     description: 'Internal agent. Manages the graph state.',
     concise_description: '(Internal) Graph state manager.',
@@ -204,36 +207,43 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     systemInstruction: SUPERVISOR_SYSTEM_INSTRUCTION,
   },
   [TaskType.Planner]: {
-    model: 'gemini-2.5-pro',
-    title: 'Planner Agent (ToT)',
-    description: 'Decomposes complex goals into step-by-step JSON plans.',
-    concise_description: 'Decomposes goals into JSON plans.',
-    strengths: 'Uses Tree-of-Thoughts (ToT) to deliberate on multiple plans and select the most optimal one.',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE
+    title: 'Planner Agent (DAG)',
+    description: 'Decomposes complex goals into a Directed Acyclic Graph (DAG) of steps.',
+    concise_description: 'Decomposes goals into a JSON plan graph.',
+    strengths: 'Uses Gemini 3 reasoning to generate a robust, parallelizable plan. Can model complex dependencies.',
     weaknesses: 'Does not execute anything. Higher latency due to internal deliberation.',
-    example_prompt: '`/plan` Refactor the app to use a new component for the header.',
-    tools: [{ functionDeclarations: [PLAN_TOOL] }], // SOTA: Use tool
+    example_prompt: '`/plan` Research SOTA RAG and CRAG patterns in parallel, then write code to implement a simple CRAG corrector.',
+    tools: [{ functionDeclarations: [PLAN_TOOL] }],
     config: {
-      // SOTA: Remove responseMimeType and responseSchema
+      thinkingConfig: { thinkingBudget: 16384 }, // Enable Thinking for Planning
     },
-    systemInstruction: `IDENTITY: You are a 'SOTA Planner Agent' (v4.3).
-    OBJECTIVE: To generate or refine a JSON plan to achieve the goal defined in the \`GraphState\`.
-    CONTEXT (PAST LESSONS):
-    {past_lessons}
-
+    systemInstruction: `IDENTITY: You are a 'SOTA Planner Agent' (v5.0).
+    OBJECTIVE: To generate or refine a JSON plan, modeled as a Directed Acyclic Graph (DAG), to achieve the goal defined in the \`GraphState\`.
+    
     GRAPH STATE:
     {graph_state_json}
+
+    PAST ATTEMPTS (for learning):
+    {past_lessons}
 
     PROCEDURE (Internal Deliberation - PWC-ToT):
     1.  **Analyze State:** Review the \`originalPrompt\` and \`history\`.
     2.  **Check for Critique:** If the \`lastOutput\` is a critique, your previous plan failed. You MUST generate a *new, corrected plan* that addresses the critique.
-    3.  **Generate Plan:** If no critique, generate the *most optimal* JSON plan to achieve the goal.
-    4.  [PLAN - ToT]: Internally generate 2-3 competing strategies.
-    5.  [CRITIQUE - PWC]: Internally critique all plans.
-    6.  [SELECT]: Select the single best plan.
-    7.  [OUTPUT]: Your final output MUST be to call the \`submit_plan\` tool with the selected, optimal plan.`
+    3.  **Check Past Lessons:** Review the \`PAST ATTEMPTS\` section to avoid repeating mistakes.
+    4.  **Generate DAG Plan:**
+        - Decompose the goal into logical steps.
+        - For each step, define its \`dependencies\` as an array of \`step_id\`s.
+        - An empty \`dependencies: []\` array means the step can run immediately.
+        - \`dependencies: [1, 2]\` means the step can only run after steps 1 and 2 are complete.
+        - Create parallel workstreams where possible.
+    5.  [PLAN - ToT]: Internally generate 2-3 competing graph strategies.
+    6.  [CRITIQUE - PWC]: Internally critique all plans for efficiency and correctness.
+    7.  [SELECT]: Select the single best plan.
+    8.  [OUTPUT]: Your final output MUST be to call the \`submit_plan\` tool with the selected, optimal plan.`
   },
   [TaskType.Research]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE
     title: 'Research Agent (Agentic RAG)',
     description: 'Performs high-quality, domain-adaptive, multi-step research.',
     concise_description: 'Researches web & local archive.',
@@ -241,8 +251,10 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     weaknesses: 'Can be slow. Web search can be unreliable.',
     example_prompt: '`/research` what are the key differences between SOTA RAG and CRAG patterns?',
     tools: [{ functionDeclarations: [AUTONOMOUS_RAG_TOOL, SOURCE_EVALUATOR_TOOL] }, { googleSearch: {} }],
-    config: {},
-    systemInstruction: `IDENTITY: You are a Research Swarm Controller (v4.0) with Agentic RAG.
+    config: {
+      thinkingConfig: { thinkingBudget: 8192 }, // Enable Thinking for Research Synthesis
+    },
+    systemInstruction: `IDENTITY: You are a Research Swarm Controller (v5.0) with Agentic RAG.
     PROCEDURE:
     1.  **Analyze Query:** Understand the user's request.
     2.  **[MANDATE] Check Local Archive:** You MUST call the \`autonomous_rag_tool\` *first* to check the local document archive.
@@ -251,16 +263,18 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     5.  **Synthesize:** Combine all findings into a final answer.`
   },
   [TaskType.Code]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE
     title: 'Code Agent (Native Execution)',
     description: 'Generates and executes Python code using the native GAIS sandbox.',
     concise_description: 'Generates & runs Python code.',
-    strengths: 'Uses the native, secure GAIS code_execution tool. No client-side Pyodide required.',
+    strengths: 'Uses Gemini 3 Logic for superior code generation. Executes via native tool.',
     weaknesses: 'Only runs Python. Cannot install new libraries.',
     example_prompt: '`/code` calculate the fibonacci sequence up to 20 and print it.',
-    tools: [{ functionDeclarations: [CODE_INTERPRETER_TOOL] }], // REFACTOR 1.2
-    config: {},
-    systemInstruction: `IDENTITY: You are a 'Code Agent' (v4.1).
+    tools: [{ functionDeclarations: [CODE_INTERPRETER_TOOL] }],
+    config: {
+        thinkingConfig: { thinkingBudget: 16384 }, // High budget for coding logic
+    },
+    systemInstruction: `IDENTITY: You are a 'Code Agent' (v5.0).
     OBJECTIVE: To write and execute correct Python code to solve the user's request.
     
     PROCEDURE (Program-of-Thought):
@@ -274,47 +288,45 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
     4.  **Act (Retry):** You MUST call the \`code_interpreter\` tool with the *new* corrected code.`
   },
    [TaskType.Critique]: {
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.5-flash', // Fast critique is usually sufficient
     title: 'Critic Agent',
     description: 'Provides harsh, fair, actionable critiques of agent outputs.',
     concise_description: 'Critiques agent outputs for quality.',
     strengths: 'Fast, objective, and good at finding flaws in logic, faithfulness, and coverage.',
-    weaknesses: 'Not a creative agent. It only evaluates and scores, it does not generate novel content.',
-    example_prompt: 'This agent is not user-facing. It is called autonomously by other agents.',
-    tools: [{ functionDeclarations: [CRITIQUE_TOOL] }], // SOTA: Use tool
-    config: {
-      // SOTA: Remove responseMimeType and responseSchema
-    },
+    weaknesses: 'Not a creative agent. It only evaluates and scores.',
+    example_prompt: 'This agent is not user-facing.',
+    tools: [{ functionDeclarations: [CRITIQUE_TOOL] }],
+    config: {},
     systemInstruction: `IDENTITY: You are a 'Critic' agent. You are a harsh but fair evaluator.
     OBJECTIVE: Evaluate a model's output against the original user query.
     PROCEDURE: 
     1. You MUST score the output on Faithfulness (1-5), Coherence (1-5), and Coverage (1-5). 
     2. Provide a detailed, actionable critique and suggested revisions.
-    CONSTRAINTS: Your output MUST be to call the \`submit_critique\` tool.` // SOTA: Update prompt
+    CONSTRAINTS: Your output MUST be to call the \`submit_critique\` tool.`
   },
   [TaskType.Chat]: {
     model: 'gemini-2.5-flash',
     title: 'Synthesizer Agent',
     description: 'A general-purpose agent for simple chat or synthesizing final answers.',
     concise_description: 'General-purpose chat & synthesis.',
-    strengths: 'Fast, conversational, and good for simple questions or reformatting text.',
-    weaknesses: 'Not a deep specialist. Lacks tool access and advanced reasoning patterns.',
+    strengths: 'Fast, conversational, and good for simple questions.',
+    weaknesses: 'Not a deep specialist.',
     example_prompt: 'Hello, how are you?',
     tools: [],
     config: {},
     systemInstruction: `You are a helpful and concise synthesizer agent. Your job is to take the [CONTEXT] from other agents (like RAG results) and formulate a final, clean answer for the user.`
   },
    [TaskType.Complex]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE
     title: 'Complex Reasoning Agent',
     description: 'Triggers an autonomous PWC/Reflexion loop for deep analysis.',
     concise_description: 'Uses a critique loop for deep analysis.',
-    strengths: 'Uses a "v1 -> critique -> v2" loop (Reflexion pattern) to produce SOTA results for complex, subjective tasks.',
-    weaknesses: 'Slower than other agents due to its multi-step reasoning process.',
+    strengths: 'Uses a "v1 -> critique -> v2" loop with Gemini 3 reasoning.',
+    weaknesses: 'Slower than other agents.',
     example_prompt: '`/complex` Write a detailed essay on the pros and cons of decentralized social media.',
     tools: [],
     config: {
-      thinkingConfig: { thinkingBudget: 32768 },
+      thinkingConfig: { thinkingBudget: 32768 }, // MAX Budget for Complex Reasoning
     },
     systemInstruction: `IDENTITY: You are a 'Complex' reasoning agent.
           OBJECTIVE: To provide a comprehensive, deeply reasoned answer using a Reflexion loop.
@@ -324,36 +336,38 @@ export const AGENT_ROSTER: Record<TaskType, any> = {
           3. You will then receive the critique and MUST generate a 'v2' final answer that incorporates the feedback.`
   },
   [TaskType.Vision]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-2.5-flash-image', // Nano Banana for speed/general tasks
     title: 'Vision Agent',
     description: 'Analyzes and answers questions about images.',
     concise_description: 'Analyzes and answers questions about images.',
     strengths: 'Can read text, identify objects, and describe scenes in any attached image.',
-    weaknesses: 'Only processes images; does not handle other file types.',
+    weaknesses: 'Only processes images.',
     example_prompt: '(Attach an image) What is happening in this picture?',
     tools: [],
     config: {},
     systemInstruction: "You are a 'Vision' agent. Your expertise is in analyzing images and providing detailed descriptions or answering specific questions about them."
   },
   [TaskType.Creative]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE for better creative writing
     title: 'Creative Agent',
     description: 'Orchestrates multimodal generation for creative tasks.',
     concise_description: 'Orchestrates multimodal creative tasks.',
     strengths: 'Can write stories, scripts, and call tools to generate video (Veo) and music (MusicFX).',
-    weaknesses: 'Generation tools are specialized and may not fit all requests.',
+    weaknesses: 'Generation tools are specialized.',
     example_prompt: '`/creative` Write a short poem about a robot learning to paint.',
     tools: [{ functionDeclarations: [VEO_TOOL, MUSICFX_TOOL] }],
-    config: {},
+    config: {
+         thinkingConfig: { thinkingBudget: 16384 },
+    },
     systemInstruction: "You are a 'Creative' agent. You can write stories, scripts, or generate media by calling your 'veo_tool' or 'musicfx_tool'."
   },
   [TaskType.Retry]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE for better error correction
     title: 'Self-Correction Agent',
     description: 'Retries a failed task based on a critique.',
     concise_description: 'Retries failed tasks based on critique.',
     strengths: 'Uses Auto-Prompt Optimization (APO) to rewrite a failed plan step and try again.',
-    weaknesses: 'Is not user-facing. Only called autonomously when a plan fails.',
+    weaknesses: 'Is not user-facing.',
     example_prompt: 'This agent is not user-facing.',
     tools: [{ functionDeclarations: [APO_REFINE_TOOL] }],
     config: {},
@@ -363,16 +377,15 @@ PROCEDURE:
 1. You will receive a structured prompt: "[Prompt]: ... [Failed Output]: ... [Critique]: ...".
 2. You MUST immediately call the \`apo_refine_tool\` with these three pieces of information.
 3. The tool will return an object: \`{ newPrompt: 'A new, corrected goal for the planner.' }\`.
-4. Your final and only output MUST be the text from \`newPrompt\`.
-5. DO NOT ADD any conversational text, pleasantries, or apologies. Your entire response must be the new prompt and nothing else.`
+4. Your final and only output MUST be the text from \`newPrompt\`.`
   },
   [TaskType.ManualRAG]: {
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.5-flash', // Fast retrieval is key here
       title: 'Local RAG Agent',
       description: 'Answers questions using the local document archive.',
       concise_description: 'Retrieves docs from local archive.',
       strengths: 'This is the *retrieval* step of the RAG 2.0 pipeline. It passes raw chunks to the Reranker.',
-      weaknesses: 'Does not synthesize. Is only called as part of a plan.',
+      weaknesses: 'Does not synthesize.',
       example_prompt: '`/manualrag` Summarize the "doc1_rag_sample.md" file from my archive.',
       tools: [],
       config: {},
@@ -381,38 +394,37 @@ PROCEDURE:
     PROCEDURE:
     1. The user's prompt will contain a "User Query" at the end and "--- RELEVANT CONTEXT ---" at the start.
     2. You MUST answer the query using *only* this provided context.
-    3. You MUST cite your sources using the [Source: ...] tag provided in the context for each piece of information.
-    4. If the provided context is insufficient, you MUST state that you cannot answer the question based on the provided documents.`
+    3. You MUST cite your sources using the [Source: ...] tag provided in the context.`
   },
   [TaskType.Meta]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE
     title: 'Meta-Agent (APO)',
     description: 'Optimizes and creates new agent instructions.',
     concise_description: 'Creates & refines new agent prompts.',
     strengths: 'Uses Automatic Prompt Optimization (APO) patterns to write SOTA-compliant system instructions.',
-    weaknesses: 'This is a high-level agent; its outputs are new instructions, not final answers.',
+    weaknesses: 'High-level agent.',
     example_prompt: '`/add_agent` Create a new agent that acts as a Socratic tutor.',
     tools: [{ functionDeclarations: [CREATE_SOTA_METAPROMPT_TOOL] }],
-    config: {},
+    config: {
+        thinkingConfig: { thinkingBudget: 16384 },
+    },
     systemInstruction: `IDENTITY: You are a 'Meta-Agent', an expert in Automatic Prompt Optimization (APO) and agentic design.
     OBJECTIVE: To create or refine SOTA-compliant system instructions for specialist agents.
     PROCEDURE:
-    1.  **Analyze Request:** The user will either ask to 'create' a new agent (e.g., "/add_agent a travel agent") or 'refine' an existing one.
-    2.  **Create:** If creating, use your knowledge of SOTA patterns (PWC, ReAct, Reflexion, ToT) to write a new, robust system instruction.
-    3.  **Refine (Textual Gradients):** If refining, you will be given an [Original Prompt] and a [Critique]. Your job is to generate a 'Textual Gradient' (an explanation of the failure) and a {New_Prompt} that fixes the flaw.`
+    1.  **Analyze Request:** The user will either ask to 'create' a new agent or 'refine' an existing one.
+    2.  **Create:** If creating, use your knowledge of SOTA patterns to write a new, robust system instruction.
+    3.  **Refine (Textual Gradients):** If refining, you will be given an [Original Prompt] and a [Critique]. Generate a 'Textual Gradient' and a {New_Prompt} that fixes the flaw.`
   },
   [TaskType.DataAnalyst]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview', // GEMINI 3 UPGRADE for better data parsing
     title: 'Data Analyst Agent',
     description: 'Analyzes data and generates visualizations.',
     concise_description: 'Analyzes data & creates visualizations.',
-    strengths: 'Can parse unstructured data, CSV, or JSON and transform it into a `VizSpec` for rendering charts.',
-    weaknesses: 'Only generates the chart data structure; does not run Python or perform complex statistical analysis.',
+    strengths: 'Can parse unstructured data into \`VizSpec\`.',
+    weaknesses: 'Only generates the chart data structure.',
     example_prompt: '`/dataanalyst` Here is my data: [Team A, 10], [Team B, 25]. Create a bar chart.',
-    tools: [{ functionDeclarations: [DATA_ANALYST_TOOL] }], // SOTA: Use tool
-    config: {
-      // SOTA: Remove responseMimeType and responseSchema
-    },
+    tools: [{ functionDeclarations: [DATA_ANALYST_TOOL] }],
+    config: {},
     systemInstruction: `IDENTITY: You are a 'Data Analyst' agent.
     OBJECTIVE: Transform unstructured text, CSV, or JSON data from the user's prompt into a structured 'VizSpec' JSON object for visualization.
     PROCEDURE:
@@ -420,14 +432,14 @@ PROCEDURE:
     2. Infer the best visualization type ('bar', 'line', 'pie').
     3. Identify the 'dataKey' (the numeric value) and 'categoryKey' (the label).
     4. Format the provided data into a JSON array for the 'data' field.
-    5. Your output MUST be to call the \`submit_visualization_spec\` tool.` // SOTA: Update prompt
+    5. Your output MUST be to call the \`submit_visualization_spec\` tool.`
   },
   [TaskType.Embedder]: {
     model: 'gemini-2.5-flash',
     title: 'Embedder Agent',
     description: 'Generates embeddings for documents for RAG.',
     concise_description: 'Background task for document embedding.',
-    strengths: 'Not user-facing. Handles background embedding tasks.',
+    strengths: 'Not user-facing.',
     weaknesses: 'Not user-facing.',
     example_prompt: 'This agent is not user-facing.',
     tools: [],
@@ -439,64 +451,39 @@ PROCEDURE:
     title: 'Reranker Agent',
     description: 'A "worker" agent that reranks retrieved documents for relevance.',
     concise_description: '(Internal) Reranks RAG results.',
-    strengths: 'Emulates a fine-tuned BERT reranker to score retrieved chunks, significantly improving RAG quality.',
-    weaknesses: 'Not user-facing. Only scores, does not synthesize.',
+    strengths: 'Emulates a fine-tuned BERT reranker.',
+    weaknesses: 'Not user-facing.',
     example_prompt: 'This agent is not user-facing.',
-    tools: [{ functionDeclarations: [RERANKER_TOOL] }], // REFACTOR 2.1
-    config: {
-      // REFACTOR 2.1: Remove brittle JSON config
-    },
+    tools: [{ functionDeclarations: [RERANKER_TOOL] }],
+    config: {},
     systemInstruction: `IDENTITY: You are a 'Reranker' agent, emulating a BERT Cross-Encoder.
-    OBJECTIVE: You will be given a [User Query] and a list of [Retrieved Chunks]. Your *only* job is to score each chunk for its relevance to the query and call the \`submit_reranked_chunks\` tool.
-    PROCEDURE:
-    1.  Analyze the [User Query].
-    2.  For each [Retrieved Chunk], assign a 'rerankScore' from 0.0 (not relevant) to 1.0 (perfectly relevant).
-    3.  A score of 1.0 means the chunk *directly* answers the query.
-    4.  A score of 0.5 means the chunk mentions *keywords* but does not answer the query.
-    5.  A score of 0.0 means the chunk is irrelevant.
-    6. Your entire response MUST be to call the \`submit_reranked_chunks\` tool with the JSON object. DO NOT add any conversational filler.
-    
-    [User Query]: {query}
-    [Retrieved Chunks]: {chunks_json}`
+    OBJECTIVE: You will be given a [User Query] and a list of [Retrieved Chunks]. Your *only* job is to score each chunk for its relevance to the query and call the \`submit_reranked_chunks\` tool.`
   },
   [TaskType.Verifier]: {
     model: 'gemini-2.5-flash',
     title: 'Verifier Agent',
     description: 'An internal agent that validates plan steps *before* execution.',
     concise_description: '(Internal) Validates plan steps.',
-    strengths: 'Fast, low-cost. Acts as a proactive safety gate (PVE). Validates all plan steps in a single batch call.',
-    weaknesses: 'Not user-facing. Can only perform logical and schema checks.',
+    strengths: 'Fast, low-cost. Acts as a proactive safety gate (PVE).',
+    weaknesses: 'Not user-facing.',
     example_prompt: 'This agent is not user-facing.',
-    tools: [{ functionDeclarations: [VERIFIER_TOOL] }], // REFACTOR 2.1
-    config: {
-      // REFACTOR 2.1: Remove brittle JSON config
-    },
-    systemInstruction: `IDENTITY: You are a 'Verifier' agent (v4.1). You are a non-creative, deterministic batch auditor.
-    OBJECTIVE: You will receive a JSON object containing an array of 'PlanSteps'. Your *only* job is to validate *each* step against a list of rules and call the \`submit_verification_results\` tool.
-    
-    RULES:
-    1.  **Tool Check:** The 'tool_to_use' MUST be a valid, existing TaskType (e.g., 'Code', 'Research').
-    2.  **Safety Check:** The 'description' MUST NOT contain any malicious, harmful, or PII-related requests.
-    3.  **Input Check:** If the 'inputs' array is not empty, the 'description' MUST contain the corresponding {placeholders}.
-    
-    PROCEDURE:
-    1.  Analyze the incoming array of [PlanSteps].
-    2.  For each step, check against all RULES.
-    3.  Construct a result object for each step: {"step_id": <id>, "status": "PASS|FAIL", "reason": "..."}.
-    4. Your entire response MUST be to call the \`submit_verification_results\` tool with the JSON object. DO NOT add any conversational filler.
-    
-    [PlanSteps]: {plan_steps_json_array}`
+    tools: [{ functionDeclarations: [VERIFIER_TOOL] }],
+    config: {},
+    systemInstruction: `IDENTITY: You are a 'Verifier' agent (v5.0). You are a non-creative, deterministic batch auditor.
+    OBJECTIVE: You will receive a JSON object containing an array of 'PlanSteps'. Your *only* job is to validate *each* step against a list of rules and call the \`submit_verification_results\` tool.`
   },
   [TaskType.Maintenance]: {
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview',
     title: 'Maintenance Agent',
     description: 'Performs app-wide debugging, finds syntax errors, and cleans up unused files.',
     concise_description: 'Debugs the app and finds errors.',
-    strengths: 'Good for high-level code analysis and maintaining application health.',
-    weaknesses: 'Does not execute code or perform file operations directly. It only analyzes and reports.',
+    strengths: 'Good for high-level code analysis.',
+    weaknesses: 'Does not execute code directly.',
     example_prompt: '`/maintenance` Run a full diagnostic on the application code.',
     tools: [],
-    config: {},
+    config: {
+         thinkingConfig: { thinkingBudget: 16384 },
+    },
     systemInstruction: `IDENTITY: You are a 'Maintenance Agent'.
     OBJECTIVE: To analyze the application codebase for syntax errors, unused files, and potential bugs.
     PROCEDURE:
@@ -506,8 +493,7 @@ PROCEDURE:
         - Syntax errors or typos in code.
         - Unused components or functions.
         - Obvious logical errors.
-    4.  Provide a clear, concise report of your findings in markdown format.
-    5.  If you find no issues, state that the "System is nominal."`
+    4.  Provide a clear, concise report of your findings in markdown format.`
   },
   [TaskType.Router]: {
     model: 'gemini-2.5-flash',

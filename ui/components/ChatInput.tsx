@@ -30,7 +30,8 @@ export const ChatInput: React.FC = () => {
     handleEmbedFile,
     handleIngestRepo,
     embeddingStatus,
-    swarmMode // NEW: Consume swarmMode
+    swarmMode,
+    isPyodideReady // Consume Pyodide state
   } = useAppContext();
 
   const [prompt, setPrompt] = useState('');
@@ -38,7 +39,6 @@ export const ChatInput: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const isEmbedding = !!embeddingStatus;
-  const isPyodideReady = true; // Pyodide is removed, assume always ready
 
   const commandPaletteRoutes = [
       { command: '/code', task: TaskType.Code, desc: 'Generate or execute code' },
@@ -114,8 +114,10 @@ export const ChatInput: React.FC = () => {
     }
   };
   
-  // NEW: Dynamically set placeholder
   const getPlaceholder = (): string => {
+    if (!isPyodideReady) {
+        return "Initializing Python runtime...";
+    }
     if (swarmMode === SwarmMode.InformalCollaborators) {
       return "Describe your goal for the Planner or use '/' for commands...";
     }
@@ -129,62 +131,64 @@ export const ChatInput: React.FC = () => {
   };
 
   return (
-    <div className="bg-card p-4 border-t border-border relative">
-        {showCommandPalette && (
-            <div className="absolute bottom-full left-4 right-4 mb-2 p-2 bg-background border border-border rounded-sm shadow-lg">
-                <p className="text-xs text-foreground/60 px-2 pb-2">Select an agent to force routing:</p>
-                {commandPaletteRoutes.map(route => (
-                    <button key={route.command} 
-                        onClick={() => handleCommandSelect(route.task, route.command)}
-                        className="w-full text-left flex items-center gap-3 p-2 hover:bg-card rounded-sm"
-                    >
-                        <span className="font-mono text-accent text-sm">{route.command}</span>
-                        <span className="text-sm text-foreground/80">{route.desc}</span>
-                    </button>
-                ))}
-            </div>
-        )}
+    <div className="bg-background p-4 border-t border-border relative">
+        <div className="w-full max-w-4xl mx-auto">
+            {showCommandPalette && (
+                <div className="absolute bottom-full left-4 right-4 mb-2 p-2 bg-popover border border-border rounded-lg shadow-lg">
+                    <p className="text-xs text-muted-foreground px-2 pb-2">Select an agent to force routing:</p>
+                    {commandPaletteRoutes.map(route => (
+                        <button key={route.command} 
+                            onClick={() => handleCommandSelect(route.task, route.command)}
+                            className="w-full text-left flex items-center gap-3 p-2 hover:bg-muted rounded-md"
+                        >
+                            <span className="font-mono text-primary text-sm">{route.command}</span>
+                            <span className="text-sm text-foreground/80">{route.desc}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
 
-        {embeddingStatus && (
-          <div className="mb-2 p-3 bg-background border border-border rounded-sm text-sm">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-foreground/80 truncate font-semibold">{embeddingStatus.title}</p>
-              <p className="text-foreground/60 flex-shrink-0">{embeddingStatus.progress} / {embeddingStatus.total}</p>
-            </div>
-            <div className="w-full bg-border h-1.5 rounded-sm overflow-hidden">
-              <div
-                className="bg-accent h-1.5 rounded-sm transition-all duration-300"
-                style={{ width: `${(embeddingStatus.progress / embeddingStatus.total) * 100}%` }}
-              ></div>
-            </div>
-          </div>
-        )}
+            {embeddingStatus && (
+              <div className="mb-2 p-3 bg-card border border-border rounded-lg text-sm">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-card-foreground truncate font-semibold">{embeddingStatus.title}</p>
+                  <p className="text-muted-foreground flex-shrink-0">{embeddingStatus.progress} / {embeddingStatus.total}</p>
+                </div>
+                <div className="w-full bg-border h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(embeddingStatus.progress / embeddingStatus.total) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
 
-        {file && (
-          <div className="mb-2">
-            <div className="flex items-center justify-between bg-background px-3 py-1.5 rounded-sm border border-border">
-                <span className="text-sm text-foreground/80">File: <span className="font-medium text-foreground">{file.name}</span></span>
-                <button onClick={() => setFile(null)} className="text-foreground/70 hover:text-white"><XCircleIcon /></button>
-            </div>
-          </div>
-        )}
+            {file && (
+              <div className="mb-2">
+                <div className="flex items-center justify-between bg-card px-3 py-1.5 rounded-md border border-border">
+                    <span className="text-sm text-card-foreground">File: <span className="font-medium text-foreground">{file.name}</span></span>
+                    <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-foreground"><XCircleIcon /></button>
+                </div>
+              </div>
+            )}
 
-        <div className="flex items-center bg-background rounded-sm p-2 border border-border focus-within:ring-1 focus-within:ring-accent">
-            <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-foreground/70 hover:text-white disabled:opacity-50" disabled={!isEmbedderReady || isEmbedding}><PaperclipIcon /></button>
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-            <button onClick={handleRepoClick} aria-label="Add GitHub repository" className="p-2 text-foreground/70 hover:text-white disabled:opacity-50" disabled={!isEmbedderReady || isEmbedding}><GitHubIcon /></button>
-            <textarea
-                value={prompt}
-                onChange={handlePromptChange}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-                placeholder={getPlaceholder()}
-                className="flex-grow bg-transparent text-foreground placeholder-foreground/50 focus:outline-none resize-none px-3 font-mono"
-                rows={1}
-                disabled={isLoading || !isPyodideReady || isEmbedding}
-            />
-            <button onClick={handleSubmit} aria-label="Send message" disabled={isLoading || isEmbedding || (!prompt.trim() && !file)} className="p-2 rounded-sm transition-colors disabled:opacity-50 enabled:bg-accent enabled:hover:bg-accent/80 text-white">
-                <SendIcon />
-            </button>
+            <div className="flex items-center bg-card rounded-lg p-2 border border-border focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
+                <button onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={!isEmbedderReady || isEmbedding}><PaperclipIcon /></button>
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                <button onClick={handleRepoClick} aria-label="Add GitHub repository" className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={!isEmbedderReady || isEmbedding}><GitHubIcon /></button>
+                <textarea
+                    value={prompt}
+                    onChange={handlePromptChange}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
+                    placeholder={getPlaceholder()}
+                    className="flex-grow bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none resize-none px-3 font-mono text-sm"
+                    rows={1}
+                    disabled={isLoading || !isPyodideReady || isEmbedding}
+                />
+                <button onClick={handleSubmit} aria-label="Send message" disabled={isLoading || isEmbedding || (!prompt.trim() && !file) || !isPyodideReady} className="p-2 rounded-md transition-colors disabled:opacity-50 enabled:bg-primary enabled:hover:bg-primary/90 text-primary-foreground">
+                    <SendIcon />
+                </button>
+            </div>
         </div>
     </div>
   );

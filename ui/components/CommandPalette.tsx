@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
@@ -12,28 +11,30 @@ import {
     OptimizeIcon,
     ChartBarIcon,
     WrenchScrewdriverIcon,
+    PerceptionIcon,
 } from '../../components/Icons';
 
-// FIX: Add missing TaskTypes to satisfy Record<TaskType, ...>
+// FIX: Made the record exhaustive to satisfy Record<TaskType, ...>
 const taskToIcon: Record<TaskType, React.FC<{className?: string}>> = {
     [TaskType.Planner]: PlanIcon,
     [TaskType.Research]: SearchIcon,
     [TaskType.Code]: CodeBracketIcon,
-    [TaskType.Critique]: BrainCircuitIcon, // Not shown
-    [TaskType.Chat]: BrainCircuitIcon, // Not shown
     [TaskType.Complex]: BrainCircuitIcon,
-    [TaskType.Vision]: BrainCircuitIcon, // Not shown
     [TaskType.Creative]: SparklesIcon,
-    [TaskType.Retry]: BrainCircuitIcon, // Not shown
     [TaskType.ManualRAG]: DocumentTextIcon,
     [TaskType.Meta]: OptimizeIcon,
     [TaskType.DataAnalyst]: ChartBarIcon,
     [TaskType.Maintenance]: WrenchScrewdriverIcon,
-    [TaskType.Embedder]: BrainCircuitIcon, // Not shown
-    [TaskType.Reranker]: BrainCircuitIcon, // Not shown
-    [TaskType.Verifier]: BrainCircuitIcon, // Not shown
-    [TaskType.Supervisor]: BrainCircuitIcon, // Not shown
-    [TaskType.Router]: BrainCircuitIcon, // Not shown
+    // Add other non-command agents with a fallback for type safety
+    [TaskType.Critique]: BrainCircuitIcon,
+    [TaskType.Chat]: BrainCircuitIcon,
+    [TaskType.Vision]: PerceptionIcon,
+    [TaskType.Retry]: BrainCircuitIcon,
+    [TaskType.Embedder]: BrainCircuitIcon,
+    [TaskType.Reranker]: BrainCircuitIcon,
+    [TaskType.Verifier]: BrainCircuitIcon,
+    [TaskType.Supervisor]: BrainCircuitIcon,
+    [TaskType.Router]: BrainCircuitIcon,
 };
 
 const commandsToShow = [
@@ -51,7 +52,7 @@ const commandsToShow = [
 export const CommandPalette: React.FC = () => {
     return (
         <div className="p-2">
-             <p className="text-xs text-foreground/60 mb-3">
+             <p className="text-xs text-muted-foreground mb-3">
                 Force the next message to be handled by a specific agent using a command.
             </p>
             <ul className="space-y-4">
@@ -67,10 +68,10 @@ export const CommandPalette: React.FC = () => {
                     return (
                         <li key={taskType}>
                             <div className="flex items-start gap-3">
-                                <Icon className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+                                <Icon className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                                 <div>
                                     <p className="font-mono text-sm font-bold text-foreground">{command}</p>
-                                    <p className="text-xs text-foreground/60 leading-snug">{config.concise_description}</p>
+                                    <p className="text-xs text-muted-foreground leading-snug">{config.concise_description}</p>
                                 </div>
                             </div>
                         </li>

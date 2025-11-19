@@ -74,6 +74,7 @@ export interface PlanStep {
   tool_to_use: string;
   acceptance_criteria: string;
   status: 'pending' | 'in-progress' | 'completed' | 'failed';
+  dependencies: number[]; // DAG SUPPORT: This step depends on the completion of these step_ids.
   result?: string;
   inputs?: string[];
   output_key?: string;
@@ -122,6 +123,11 @@ export interface VizSpec {
   categoryKey: string;
 }
 
+export interface PyodideExecutionResult {
+  stdout: string;
+  stderr: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
@@ -142,6 +148,7 @@ export interface ChatMessage {
   taskType?: TaskType;
   workflowState?: WorkflowState;
   vizSpec?: VizSpec;
+  followUpSuggestions?: string[];
 }
 
 export interface FileData {

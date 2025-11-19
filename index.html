@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -22,19 +21,45 @@
               mono: ['"Roboto Mono"', 'monospace'],
             },
             colors: {
-              // All colors now use CSS variables
-              'background': 'var(--color-background)',
-              'foreground': 'var(--color-foreground)',
-              'card': 'var(--color-card)',
-              'user-bubble': 'var(--color-user-bubble)',
-              'accent': 'var(--color-accent)',
-              'border': 'var(--color-border)',
+              border: "hsl(var(--border))",
+              input: "hsl(var(--input))",
+              ring: "hsl(var(--ring))",
+              background: "hsl(var(--background))",
+              foreground: "hsl(var(--foreground))",
+              primary: {
+                DEFAULT: "hsl(var(--primary))",
+                foreground: "hsl(var(--primary-foreground))",
+              },
+              secondary: {
+                DEFAULT: "hsl(var(--secondary))",
+                foreground: "hsl(var(--secondary-foreground))",
+              },
+              destructive: {
+                DEFAULT: "hsl(var(--destructive))",
+                foreground: "hsl(var(--destructive-foreground))",
+              },
+              muted: {
+                DEFAULT: "hsl(var(--muted))",
+                foreground: "hsl(var(--muted-foreground))",
+              },
+              accent: {
+                DEFAULT: "hsl(var(--accent))",
+                foreground: "hsl(var(--accent-foreground))",
+              },
+              popover: {
+                DEFAULT: "hsl(var(--popover))",
+                foreground: "hsl(var(--popover-foreground))",
+              },
+              card: {
+                DEFAULT: "hsl(var(--card))",
+                foreground: "hsl(var(--card-foreground))",
+              },
+              'user-bubble': 'hsl(var(--user-bubble))',
             },
             borderRadius: {
-              'lg': '0.125rem',
-              'md': '0.125rem',
-              'sm': '0.125rem',
-              'full': '0.125rem',
+              lg: "var(--radius)",
+              md: "calc(var(--radius) - 2px)",
+              sm: "calc(var(--radius) - 4px)",
             },
             animation: {
               'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
@@ -55,37 +80,105 @@
       }
     </script>
     <style>
-      /* This style block defines our theme variables.
-        Tailwind is configured to *use* these variables.
-        The AppProvider will change the class on the root div
-        to swap these palettes.
-      */
-      body, .sb {
-        /* DEFAULT THEME (SB - Służba Bezpieczeństwa) */
-        --color-background: #212121;
-        --color-foreground: #E0E0E0;
-        --color-card: #333333;
-        --color-user-bubble: #4F4F4F;
-        --color-accent: #E53935;
-        --color-border: #424242;
+      :root, .sb {
+        /* DEFAULT THEME (SB - Służba Bezpieczeństwa - 80s PRL) */
+        --background: 0 0% 14%;
+        --foreground: 60 13% 81%;
+        --card: 0 0% 19%;
+        --card-foreground: 60 13% 81%;
+        --popover: 0 0% 14%;
+        --popover-foreground: 60 13% 81%;
+        --primary: 0 67% 47%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 0 0% 27%;
+        --secondary-foreground: 60 13% 81%;
+        --muted: 0 0% 27%;
+        --muted-foreground: 60 13% 70%;
+        --accent: 0 67% 47%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 27%;
+        --input: 0 0% 27%;
+        --ring: 0 67% 47%;
+        --user-bubble: 0 0% 23%;
+        --radius: 0.25rem;
       }
-      .abw-light {
-        /* ABW - Light (Modern Dystopian) */
-        --color-background: #F0F2F5; /* Off-white */
-        --color-foreground: #1A202C; /* Dark Slate */
-        --color-card: #FFFFFF;
-        --color-user-bubble: #E2E8F0; /* Light Gray */
-        --color-accent: #3182CE; /* Modern Blue */
-        --color-border: #CBD5E0; /* Lighter Gray Border */
+      .sb {
+         background-image: url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='hsl(var(--card))' fill-opacity='0.6' fill-rule='evenodd'%3E%3Cpath d='M5 0h1L0 6V5zM6 5v1H5z'/%3E%3C/g%3E%3C/svg%3E");
       }
-      .abw-dark {
-        /* ABW - Dark (Modern Dystopian) */
-        --color-background: #1A202C; /* Dark Slate */
-        --color-foreground: #E2E8F0; /* Light Gray */
-        --color-card: #2D3748; /* Darker Card */
-        --color-user-bubble: #4A5568; /* Mid Gray */
-        --color-accent: #4299E1; /* Brighter Blue */
-        --color-border: #4A5568;
+      .wsi-light {
+        /* WSI - Light (Polish 90s-2000s) */
+        --background: 0 0% 75%;
+        --foreground: 0 0% 0%;
+        --card: 0 0% 75%;
+        --card-foreground: 0 0% 0%;
+        --popover: 0 0% 75%;
+        --popover-foreground: 0 0% 0%;
+        --primary: 240 100% 25%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 0 0% 69%;
+        --secondary-foreground: 0 0% 0%;
+        --muted: 0 0% 69%;
+        --muted-foreground: 0 0% 30%;
+        --accent: 240 100% 25%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 50%;
+        --input: 0 0% 50%;
+        --ring: 240 100% 25%;
+        --user-bubble: 0 0% 69%;
+        --radius: 0rem;
+      }
+      .wsi-dark {
+        /* WSI - Dark (Polish 90s-2000s - Dark Mode) */
+        --background: 240 33% 8%;
+        --foreground: 0 0% 75%;
+        --card: 240 33% 15%;
+        --card-foreground: 0 0% 75%;
+        --popover: 240 33% 8%;
+        --popover-foreground: 0 0% 75%;
+        --primary: 180 100% 25%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 20% 25%;
+        --secondary-foreground: 0 0% 75%;
+        --muted: 240 20% 25%;
+        --muted-foreground: 0 0% 60%;
+        --accent: 180 100% 25%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 240 20% 30%;
+        --input: 240 20% 30%;
+        --ring: 180 100% 25%;
+        --user-bubble: 240 20% 23%;
+        --radius: 0rem;
+      }
+      /* --- WSI Specific Styles --- */
+      .wsi-light [class*="bg-"], .wsi-dark [class*="bg-"] {
+        box-shadow: inset 1px 1px 0px #ffffff80, inset -1px -1px 0px #00000080;
+      }
+       .wsi-light .border, .wsi-dark .border {
+        border-style: solid;
+        border-color: hsl(var(--border));
+        box-shadow: inset 1px 1px 0px #ffffff80;
+      }
+      .wsi-dark {
+        position: relative;
+      }
+      .wsi-dark::after {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-image: linear-gradient(rgba(18,16,16,0) 50%,rgba(0,0,0,0.25) 50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06));
+        background-size: 100% 4px, 6px 100%;
+        pointer-events: none;
+        z-index: 9999;
+        opacity: 0.3;
       }
     </style>
   <script type="importmap">
@@ -99,7 +192,8 @@
     "@genkit-ai/googleai": "https://aistudiocdn.com/@genkit-ai/googleai@^1.22.0",
     "@genkit-ai/flow": "https://aistudiocdn.com/@genkit-ai/flow@^0.5.17",
     "recharts": "https://aistudiocdn.com/recharts@^3.4.1",
-    "dexie": "https://aistudiocdn.com/dexie@^4.0.7"
+    "dexie": "https://aistudiocdn.com/dexie@^4.0.7",
+    "zustand": "https://aistudiocdn.com/zustand@^5.1.4"
   }
 }
 </script>

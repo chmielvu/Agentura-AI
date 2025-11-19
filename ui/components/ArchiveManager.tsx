@@ -1,10 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
-import { useDB, ArchiveSummary } from '../hooks/useDB';
+import { db, ArchiveSummary } from '../hooks/useDB';
 
 export const ArchiveManager: React.FC = () => {
     const [summary, setSummary] = useState<ArchiveSummary[]>([]);
-    const { getArchiveSummary, deleteSource, clearArchive } = useDB();
+    const { getArchiveSummary, deleteSource, clearArchive } = db;
     const [error, setError] = useState<string | null>(null);
 
     const refreshSummary = async () => {

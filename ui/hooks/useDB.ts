@@ -15,6 +15,10 @@ const getDbInstance = () => {
     if (dbInstance) {
         return dbInstance as Dexie & { chunks: Table<DocChunk, string>, reflexionMemory: Table<ReflexionEntry, number> };
     }
+    if (typeof window === 'undefined') {
+         // Handle SSR or non-browser environments gracefully
+         return null as any;
+    }
     try {
         const db = new Dexie('AgenturaVectorDB') as Dexie & {
             chunks: Table<DocChunk, string>;
@@ -39,8 +43,8 @@ const getDbInstance = () => {
         dbInstance = db;
         return dbInstance;
     } catch (e) {
-        console.error("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode).", e);
-        throw e;
+        console.warn("Failed to initialize the database. This may be due to browser restrictions (e.g., private browsing mode). Features requiring persistent storage will be disabled.", e);
+        return null as any;
     }
 };
 
@@ -63,36 +67,43 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 // ---------------------------------------------------
 
-export const useDB = () => {
+const addDocument = async (chunk: DocChunk) => {
     const db = getDbInstance();
-
-    const addDocument = async (chunk: DocChunk) => {
+    if (!db) return;
+    try {
         return await db.chunks.put(chunk);
-    };
+    } catch(e) { console.warn("DB write failed", e); }
+};
 
-    const findSimilar = async (queryVector: number[], topK = 5, sourceFilter?: string) => {
-        if (!queryVector || queryVector.length === 0) return [];
-        
-        // --- SOTA IMPROVEMENT (OPPORTUNITY 3): PERFORMANCE WARNING ---
-        // This is a brute-force O(n) scan. It will not scale beyond a few thousand chunks.
-        // A production-grade solution would use an optimized index (e.g., HNSWlib) or a server-side vector DB.
+const findSimilar = async (queryVector: number[], topK = 5, sourceFilter?: string) => {
+    const db = getDbInstance();
+    if (!db) return [];
+    if (!queryVector || queryVector.length === 0) return [];
+    
+    try {
         const allChunks = await (sourceFilter
             ? db.chunks.where('source').equals(sourceFilter).toArray()
             : db.chunks.toArray());
 
         if (allChunks.length > 1000 && !sourceFilter) {
-            console.warn(`[PERFORMANCE WARNING] Client-side vector search is scanning ${allChunks.length} chunks. This will be slow. Consider implementing a server-side vector DB or a client-side HNSW index.`);
+            console.warn(`[PERFORMANCE WARNING] Client-side vector search is scanning ${allChunks.length} chunks. This will be slow.`);
         }
-        // --- END SOTA IMPROVEMENT ---
         
         const scored = allChunks.map(chunk => ({
             ...chunk,
             similarity: cosineSimilarity(queryVector, chunk.embedding)
         }));
         return scored.sort((a, b) => b.similarity - a.similarity).slice(0, topK);
-    };
+    } catch (e) {
+        console.warn("DB search failed", e);
+        return [];
+    }
+};
 
-    const getArchiveSummary = async (): Promise<ArchiveSummary[]> => {
+const getArchiveSummary = async (): Promise<ArchiveSummary[]> => {
+    const db = getDbInstance();
+    if (!db) return [];
+    try {
         const summary = new Map<string, number>();
         await db.chunks.each(chunk => {
             summary.set(chunk.source, (summary.get(chunk.source) || 0) + 1);
@@ -101,30 +112,44 @@ export const useDB = () => {
             source,
             chunkCount
         }));
-    };
+    } catch(e) {
+        console.warn("DB summary failed", e);
+        return [];
+    }
+};
 
-    const deleteSource = async (sourceName: string) => {
+const deleteSource = async (sourceName: string) => {
+    const db = getDbInstance();
+    if (!db) return;
+    try {
         const chunksToDelete = await db.chunks.where('source').equals(sourceName).primaryKeys();
         return await db.chunks.bulkDelete(chunksToDelete);
-    };
+    } catch(e) { console.warn("DB delete failed", e); }
+};
 
-    const clearArchive = async () => {
+const clearArchive = async () => {
+    const db = getDbInstance();
+    if (!db) return;
+    try {
         await db.chunks.clear();
-        await db.reflexionMemory.clear(); // Also clear reflexion memory
-    };
+        await db.reflexionMemory.clear();
+    } catch(e) { console.warn("DB clear failed", e); }
+};
 
-    // --- NEW FUNCTIONS FOR MANDATES 3.1 & 3.2 ---
-    const addReflexionEntry = async (entry: ReflexionEntry) => {
+const addReflexionEntry = async (entry: ReflexionEntry) => {
+    const db = getDbInstance();
+    if (!db) return;
+    try {
         return await db.reflexionMemory.put(entry);
-    };
+    } catch(e) { console.warn("DB write failed", e); }
+};
 
-    const findSimilarReflexions = async (queryEmbedding: number[], topK = 2): Promise<ReflexionEntry[]> => {
-        if (!queryEmbedding || queryEmbedding.length === 0) return [];
-        
-        // Ensure table exists by calling getDbInstance()
-        getDbInstance();
-        
-        // SOTA: This is also a brute-force scan and will not scale.
+const findSimilarReflexions = async (queryEmbedding: number[], topK = 2): Promise<ReflexionEntry[]> => {
+    const db = getDbInstance();
+    if (!db) return [];
+    if (!queryEmbedding || queryEmbedding.length === 0) return [];
+    
+    try {
         const allReflexions = await db.reflexionMemory.toArray();
         if (allReflexions.length === 0) return [];
         
@@ -133,27 +158,34 @@ export const useDB = () => {
             similarity: cosineSimilarity(queryEmbedding, entry.promptEmbedding)
         }));
         
-        // Filter for only relevant lessons (e.g., similarity > 0.7)
         return scored
             .sort((a, b) => b.similarity - a.similarity)
             .filter(r => r.similarity > 0.7)
             .slice(0, topK);
-    };
-    
-    const getChunksBySourcePrefix = async (prefix: string) => {
+    } catch(e) {
+        console.warn("DB search failed", e);
+        return [];
+    }
+};
+
+const getChunksBySourcePrefix = async (prefix: string) => {
+    const db = getDbInstance();
+    if (!db) return [];
+    try {
         return await db.chunks.where('source').startsWith(prefix).toArray();
-    };
-    // --- END NEW FUNCTIONS ---
+    } catch(e) {
+        console.warn("DB prefix search failed", e);
+        return [];
+    }
+};
 
-
-    return { 
-        addDocument, 
-        findSimilar, 
-        clearArchive, 
-        getArchiveSummary, 
-        deleteSource, 
-        getChunksBySourcePrefix,
-        addReflexionEntry,      // MANDATE 3.1
-        findSimilarReflexions,  // MANDATE 3.2
-    };
+export const db = {
+    addDocument, 
+    findSimilar, 
+    clearArchive, 
+    getArchiveSummary, 
+    deleteSource, 
+    getChunksBySourcePrefix,
+    addReflexionEntry,
+    findSimilarReflexions,
 };

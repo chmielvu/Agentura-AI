@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { CommandPalette } from './CommandPalette';
 import { AgentGraphVisualizer } from './AgentGraphVisualizer';
@@ -27,7 +26,7 @@ export const ContextPanel: React.FC = () => {
                  return lastGraphableTask ? (
                     <AgentGraphVisualizer taskType={lastGraphableTask.taskType} workflowState={lastGraphableTask.workflowState} />
                 ) : (
-                    <div className="text-center text-xs text-foreground/50 py-8">
+                    <div className="text-center text-xs text-muted-foreground py-8">
                         No task has been run yet.
                     </div>
                 );
@@ -47,13 +46,11 @@ export const ContextPanel: React.FC = () => {
 
     return (
         <div className="h-full flex flex-col bg-card/50">
-            <div className="flex-shrink-0 flex items-stretch border-b border-border">
-                <div className="flex items-center">
-                    <TabButton name="Agent Roster" view="roster" activeTab={activeTab} setActiveTab={setActiveTab} />
-                    <TabButton name="Archive" view="archive" activeTab={activeTab} setActiveTab={setActiveTab} />
-                    <TabButton name="Commands" view="commands" activeTab={activeTab} setActiveTab={setActiveTab} />
-                    <TabButton name="Graph" view="graph" activeTab={activeTab} setActiveTab={setActiveTab} />
-                </div>
+            <div className="flex-shrink-0 flex items-stretch border-b border-border p-1 bg-muted/50">
+                <TabButton name="Agent Roster" view="roster" activeTab={activeTab} setActiveTab={setActiveTab} />
+                <TabButton name="Archive" view="archive" activeTab={activeTab} setActiveTab={setActiveTab} />
+                <TabButton name="Commands" view="commands" activeTab={activeTab} setActiveTab={setActiveTab} />
+                <TabButton name="Graph" view="graph" activeTab={activeTab} setActiveTab={setActiveTab} />
             </div>
             <div className="flex-1 overflow-y-auto">
                 {renderView()}
@@ -68,8 +65,8 @@ const TabButton: React.FC<{ name: string, view: View, activeTab: View, setActive
 ({ name, view, activeTab, setActiveTab }) => (
     <button 
         onClick={() => setActiveTab(view)}
-        className={`px-3 py-2 text-xs font-sans font-semibold uppercase tracking-wider transition-colors h-full ${
-            activeTab === view ? 'text-foreground border-b-2 border-accent' : 'text-foreground/60 hover:text-foreground'
+        className={`flex-1 px-3 py-1.5 text-xs font-sans font-semibold uppercase tracking-wider transition-colors rounded-sm ${
+            activeTab === view ? 'text-foreground bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
         }`}
     >
         {name}

@@ -16,7 +16,8 @@
     "@genkit-ai/googleai": "^1.22.0",
     "@genkit-ai/flow": "^0.5.17",
     "recharts": "^3.4.1",
-    "dexie": "^4.0.7"
+    "dexie": "^4.0.7",
+    "zustand": "^5.1.4"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

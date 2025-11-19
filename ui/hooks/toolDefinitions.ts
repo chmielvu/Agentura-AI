@@ -11,7 +11,7 @@ export const ROUTER_TOOL: FunctionDeclaration = {
             route: {
                 type: Type.STRING,
                 description: 'The best agent to handle the request.',
-                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Verifier && t !== TaskType.Reranker && t !== TaskType.Embedder && t !== TaskType.Supervisor), // Internal agents
+                enum: Object.values(TaskType).filter(t => t !== TaskType.Critique && t !== TaskType.Verifier && t !== TaskType.Reranker && t !== TaskType.Embedder && t !== TaskType.Supervisor && t !== TaskType.Router), // Internal agents + Router itself
             },
             complexity_score: {
                 type: Type.NUMBER,

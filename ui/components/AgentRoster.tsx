@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { SwarmMode, TaskType } from '../../types';
 import { AGENT_ROSTER } from '../../constants';
@@ -82,7 +81,7 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
 
     return (
         <div className="p-2">
-            <p className="text-xs text-foreground/60 mb-3 px-1">
+            <p className="text-xs text-muted-foreground mb-3 px-1">
                 {isInformalMode 
                     ? "Select agents for the 'Informal Collaborators' swarm." 
                     : "The 'Security Service' swarm uses a fixed, pre-defined roster."}
@@ -99,19 +98,19 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ swarmMode, activeRoste
                     return (
                         <li key={taskType} className="flex items-center justify-between p-1">
                             <div className="flex items-start gap-3 flex-1 overflow-hidden">
-                                <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEnabled ? 'text-accent' : 'text-foreground/40'}`} />
+                                <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEnabled ? 'text-primary' : 'text-foreground/40'}`} />
                                 <div className="flex-1 overflow-hidden">
-                                    <p className={`font-mono text-sm font-bold ${isEnabled ? 'text-foreground' : 'text-foreground/60'}`}>
+                                    <p className={`font-mono text-sm font-bold ${isEnabled ? 'text-foreground' : 'text-muted-foreground'}`}>
                                         {agent.title}
                                         <button 
                                             onClick={() => onShowAgentDetails(agent)} 
-                                            className="ml-1.5 text-foreground/60 hover:text-white transition-colors"
+                                            className="ml-1.5 text-muted-foreground hover:text-foreground transition-colors"
                                             title="Explain this agent"
                                         >
                                             [?]
                                         </button>
                                     </p>
-                                    <p className="text-xs text-foreground/60 leading-snug truncate" title={agent.description}>
+                                    <p className="text-xs text-muted-foreground leading-snug truncate" title={agent.description}>
                                         {agent.concise_description}
                                     </p>
                                 </div>
